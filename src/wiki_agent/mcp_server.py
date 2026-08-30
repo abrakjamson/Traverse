@@ -7,20 +7,22 @@ from mcp.server.fastmcp import FastMCP
 from .cache import Cache
 from .config import Config
 from .errors import WikiAgentError
-from .fetcher import WikipediaFetcher
-from . import parser
+from .fetcher import PoliteFetcher
+from .providers import build_registry
 
 
 def create_mcp_server(config: Config) -> FastMCP:
     mcp = FastMCP(
         "PurePath",
         instructions=(
-            "Browse English Wikipedia politely. Use traverse for link discovery, "
-            "skim for section-level understanding, and read for full page content."
+            "Browse supported knowledge sites politely. Use traverse for link discovery, "
+            "skim for section-level understanding, and read for full page content. "
+            "Search endpoints are intentionally blocked."
         ),
     )
     cache = Cache(config.cache_path)
-    fetcher = WikipediaFetcher(config, cache)
+    registry = build_registry(config)
+    fetcher = PoliteFetcher(config, cache, registry)
     fetcher.initialize()
 
     def tool_error(exc: WikiAgentError) -> ValueError:
@@ -37,19 +39,28 @@ def create_mcp_server(config: Config) -> FastMCP:
         offset: int = 0,
         context_max_chars: int = 240,
     ) -> dict[str, Any]:
-        """Discover filtered, paginated links from a Wikipedia page."""
+        """Discover filtered, paginated links from Wikipedia, IMDb Help, or arXiv."""
         if not 1 <= max_links <= 200:
             raise ValueError("max_links must be from 1 to 200")
         if offset < 0:
             raise ValueError("offset must be non-negative")
         if not 0 <= context_max_chars <= 2000:
             raise ValueError("context_max_chars must be from 0 to 2000")
-        valid_page_types = {"article", "portal", "category", "other"}
+        valid_page_types = {
+            "abstract",
+            "article",
+            "category",
+            "index",
+            "listing",
+            "other",
+            "portal",
+        }
         if page_types and not set(page_types).issubset(valid_page_types):
             raise ValueError("page_types contains an unsupported value")
         try:
             fetched = fetcher.fetch(url, cache_only=cache_only)
-            return parser.traverse(
+            adapter = registry.by_name(fetched.provider)
+            return adapter.traverse(
                 fetched,
                 max_links,
                 query=query,
@@ -78,7 +89,8 @@ def create_mcp_server(config: Config) -> FastMCP:
                 raise ValueError("cache_ttl_override must be non-negative")
         try:
             fetched = fetcher.fetch(url, ttl_seconds=cache_ttl_override)
-            return parser.skim(
+            adapter = registry.by_name(fetched.provider)
+            return adapter.skim(
                 fetched,
                 selected_sections=sections,
                 max_links_per_section=max_links_per_section,
@@ -88,12 +100,13 @@ def create_mcp_server(config: Config) -> FastMCP:
 
     @mcp.tool()
     def read(url: str, format: str = "plain") -> dict[str, Any]:
-        """Retrieve full simplified text or sanitized HTML from a Wikipedia page."""
+        """Retrieve full simplified text or sanitized HTML from a supported page."""
         if format not in {"plain", "html"}:
             raise ValueError("format must be plain or html")
         try:
             fetched = fetcher.fetch(url)
-            return parser.read(fetched, output_format=format)
+            adapter = registry.by_name(fetched.provider)
+            return adapter.read(fetched, output_format=format)
         except WikiAgentError as exc:
             raise tool_error(exc) from exc
 
@@ -104,6 +117,8 @@ def create_mcp_server(config: Config) -> FastMCP:
             "status": "ok",
             "robots_checked_at": fetcher.robots_checked_at,
             "crawl_delay_seconds": fetcher.crawl_delay_seconds,
+            "providers": registry.names,
+            "hosts": fetcher.provider_status(),
         }
 
     return mcp

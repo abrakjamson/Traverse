@@ -525,6 +525,7 @@ def traverse(
         "links": links,
         "meta": {
             "page_type": page_type(fetch.url),
+            "provider": "wikipedia",
             "link_count": len(links),
             "offset": offset,
             "next_offset": offset + len(links) if has_more else None,
@@ -587,6 +588,7 @@ def skim(
         "categories": category_names(document),
         "meta": {
             "word_count": word_count,
+            "provider": "wikipedia",
             "total_sections": len(all_sections),
             "sections_truncated": selected_sections is None and len(all_sections) > len(included),
             "tables_truncated": tables_truncated,
@@ -616,6 +618,7 @@ def read(fetch: FetchResult, *, output_format: str) -> dict[str, Any]:
         "tables": skim_result["tables"],
         "meta": {
             "word_count": len(text.split()),
+            "provider": "wikipedia",
             "sections_returned": len(skim_result["sections"]),
             "cached": fetch.cached,
             "etag": fetch.etag,

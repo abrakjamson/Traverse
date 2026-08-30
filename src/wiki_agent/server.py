@@ -12,8 +12,8 @@ from . import __version__
 from .cache import Cache
 from .config import Config
 from .errors import WikiAgentError
-from .fetcher import WikipediaFetcher
-from . import parser
+from .fetcher import PoliteFetcher
+from .providers import build_registry
 
 
 def now() -> str:
@@ -26,7 +26,8 @@ class StdioServer:
         self.stdin = stdin
         self.stdout = stdout
         self.cache = Cache(config.cache_path)
-        self.fetcher = WikipediaFetcher(config, self.cache)
+        self.registry = build_registry(config)
+        self.fetcher = PoliteFetcher(config, self.cache, self.registry)
         self._write_lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=config.max_concurrency)
         self._slots = threading.BoundedSemaphore(config.max_concurrency)
@@ -171,7 +172,19 @@ class StdioServer:
         page_types = params.get("page_types")
         if page_types is not None and (
             not isinstance(page_types, list)
-            or not all(value in {"article", "portal", "category", "other"} for value in page_types)
+            or not all(
+                value
+                in {
+                    "abstract",
+                    "article",
+                    "category",
+                    "index",
+                    "listing",
+                    "other",
+                    "portal",
+                }
+                for value in page_types
+            )
         ):
             raise WikiAgentError("invalid_request", "page_types contains an unsupported value")
         namespaces = params.get("namespaces")
@@ -180,9 +193,10 @@ class StdioServer:
         ):
             raise WikiAgentError("invalid_request", "namespaces must be an array of strings")
         fetched = self.fetcher.fetch(params.get("url"), cache_only=cache_only)
+        adapter = self.registry.by_name(fetched.provider)
         self._write_response(
             request["id"],
-            parser.traverse(
+            adapter.traverse(
                 fetched,
                 max_links,
                 query=query,
@@ -208,9 +222,14 @@ class StdioServer:
             if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 0:
                 raise WikiAgentError("invalid_request", "cache_ttl_override must be a non-negative integer")
         fetched = self.fetcher.fetch(params.get("url"), ttl_seconds=ttl)
+        adapter = self.registry.by_name(fetched.provider)
         self._write_response(
             request["id"],
-            parser.skim(fetched, selected_sections=sections, max_links_per_section=max_links),
+            adapter.skim(
+                fetched,
+                selected_sections=sections,
+                max_links_per_section=max_links,
+            ),
         )
 
     def _read(self, request: dict[str, Any]) -> None:
@@ -222,7 +241,8 @@ class StdioServer:
         if not isinstance(stream, bool):
             raise WikiAgentError("invalid_request", "stream must be a boolean")
         fetched = self.fetcher.fetch(params.get("url"))
-        result = parser.read(fetched, output_format=output_format)
+        adapter = self.registry.by_name(fetched.provider)
+        result = adapter.read(fetched, output_format=output_format)
         if not stream:
             self._write_response(request["id"], result)
             return
@@ -249,6 +269,8 @@ class StdioServer:
                 "status": "ok",
                 "robots_checked_at": self.fetcher.robots_checked_at,
                 "crawl_delay_seconds": self.fetcher.crawl_delay_seconds,
+                "providers": self.registry.names,
+                "hosts": self.fetcher.provider_status(),
             },
         )
 

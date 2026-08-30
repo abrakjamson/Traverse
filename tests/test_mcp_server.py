@@ -16,7 +16,7 @@ def test_mcp_server_registers_wikipedia_tools(monkeypatch, tmp_path) -> None:
         )
     )
     monkeypatch.setattr(
-        "wiki_agent.mcp_server.WikipediaFetcher.initialize",
+        "wiki_agent.mcp_server.PoliteFetcher.initialize",
         lambda self: self._set_robots("User-agent: *\nAllow: /wiki/\n", 1),
     )
 

@@ -10,12 +10,24 @@ import urllib.request
 import urllib.robotparser
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from .cache import Cache, CacheEntry
 from .config import Config
 from .errors import WikiAgentError
-from .urls import ALLOWED_NAMESPACES, BLOCKED_NAMESPACES, namespace_for_title
+
+if TYPE_CHECKING:
+    from .providers import ProviderRegistry
+    from .providers.base import SiteAdapter
+
+
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+MAX_REDIRECTS = 5
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def iso_timestamp(timestamp: float | None = None) -> str:
@@ -31,6 +43,16 @@ class FetchResult:
     etag: str | None
     last_modified: str | None
     content_type: str | None
+    provider: str = "wikipedia"
+
+
+@dataclass(slots=True)
+class HostState:
+    robots: urllib.robotparser.RobotFileParser
+    robots_checked_at: float | None
+    crawl_delay: float
+    last_request: float
+    lock: threading.Lock
 
 
 class SlidingRateLimiter:
@@ -53,134 +75,270 @@ class SlidingRateLimiter:
             self._last_seen[key] = now
 
 
-class WikipediaFetcher:
-    def __init__(self, config: Config, cache: Cache):
+class PoliteFetcher:
+    def __init__(
+        self,
+        config: Config,
+        cache: Cache,
+        registry: ProviderRegistry | None = None,
+    ):
+        from .providers import build_registry
+
         self.config = config
         self.cache = cache
-        self._robots = urllib.robotparser.RobotFileParser()
-        self._robots_checked_at: float | None = None
-        self._crawl_delay = config.crawl_delay_seconds
-        self._host_lock = threading.Lock()
-        self._last_host_request = 0.0
+        self.registry = registry or build_registry(config)
+        self._states: dict[str, HostState] = {}
+        self._states_lock = threading.Lock()
         self.client_rate_limiter = SlidingRateLimiter(config.rate_limit_rps)
 
     @property
     def robots_checked_at(self) -> str | None:
-        return iso_timestamp(self._robots_checked_at) if self._robots_checked_at else None
+        timestamps = [
+            state.robots_checked_at
+            for state in self._states.values()
+            if state.robots_checked_at is not None
+        ]
+        return iso_timestamp(max(timestamps)) if timestamps else None
 
     @property
     def crawl_delay_seconds(self) -> float:
-        return self._crawl_delay
+        delays = [state.crawl_delay for state in self._states.values()]
+        return max(delays, default=self.config.crawl_delay_seconds)
+
+    def provider_status(self) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        for origin, state in sorted(self._states.items()):
+            results.append(
+                {
+                    "origin": origin,
+                    "robots_checked_at": (
+                        iso_timestamp(state.robots_checked_at)
+                        if state.robots_checked_at
+                        else None
+                    ),
+                    "crawl_delay_seconds": state.crawl_delay,
+                }
+            )
+        return results
 
     def initialize(self) -> None:
-        self.refresh_robots()
+        # Robots are loaded lazily per site so arXiv's 15-second delay cannot block MCP startup.
+        return
 
     def validate_url(self, value: object) -> str:
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str):
             raise WikiAgentError("invalid_request", "url must be a non-empty string")
+        return self.registry.resolve(value).validate_url(value)
 
-        parsed = urllib.parse.urlsplit(value)
-        expected = urllib.parse.urlsplit(self.config.base_url)
-        if parsed.scheme != expected.scheme or parsed.hostname != expected.hostname:
-            raise WikiAgentError(
-                "invalid_request",
-                f"url must use the configured Wikipedia origin {self.config.base_url}",
-            )
-        if parsed.username or parsed.password or parsed.port or parsed.query:
-            raise WikiAgentError("invalid_request", "url must not contain credentials, a port, or a query")
-        if not parsed.path.startswith("/wiki/"):
-            raise WikiAgentError("invalid_request", "only /wiki/* pages are supported")
+    def _origin(self, url: str) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        return f"{parsed.scheme}://{parsed.hostname}"
 
-        raw_path_lower = parsed.path.lower()
-        if "%2f" in raw_path_lower or "%5c" in raw_path_lower:
-            raise WikiAgentError("invalid_request", "encoded path separators are not allowed")
-        decoded_path = urllib.parse.unquote(parsed.path)
-        if any(segment == ".." for segment in decoded_path.split("/")):
-            raise WikiAgentError("invalid_request", "parent path segments are not allowed")
+    def _state(self, origin: str) -> HostState:
+        with self._states_lock:
+            state = self._states.get(origin)
+            if state is None:
+                state = HostState(
+                    robots=urllib.robotparser.RobotFileParser(),
+                    robots_checked_at=None,
+                    crawl_delay=self.config.crawl_delay_seconds,
+                    last_request=0.0,
+                    lock=threading.Lock(),
+                )
+                self._states[origin] = state
+            return state
 
-        title = decoded_path.removeprefix("/wiki/")
-        if not title:
-            raise WikiAgentError("invalid_request", "url must identify a Wikipedia page")
-        namespace = namespace_for_title(title)
-        if namespace in BLOCKED_NAMESPACES:
-            raise WikiAgentError("invalid_request", f"the {namespace.replace('_', ' ')} namespace is not supported")
-        if namespace not in ALLOWED_NAMESPACES:
-            raise WikiAgentError("invalid_request", f"the {namespace.replace('_', ' ')} namespace is not supported")
-
-        clean_path = urllib.parse.quote(decoded_path, safe="/:()_")
-        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, clean_path, "", ""))
-
-    def refresh_robots(self, force: bool = False) -> None:
+    def refresh_robots(self, adapter: SiteAdapter, url: str, force: bool = False) -> HostState:
+        origin = self._origin(url)
+        state = self._state(origin)
         now = time.time()
         if (
             not force
-            and self._robots_checked_at is not None
-            and now - self._robots_checked_at <= self.config.robots_ttl_seconds
+            and state.robots_checked_at is not None
+            and now - state.robots_checked_at <= self.config.robots_ttl_seconds
         ):
-            return
-        saved = self.cache.get_state("robots")
+            return state
+
+        state_key = f"robots:{origin}"
+        saved = self.cache.get_state(state_key)
         if (
             not force
             and saved
             and now - float(saved["checked_at"]) <= self.config.robots_ttl_seconds
         ):
-            self._set_robots(saved["body"], float(saved["checked_at"]))
-            return
+            self._set_robots(
+                saved["body"],
+                float(saved["checked_at"]),
+                origin=origin,
+                robots_url=adapter.robots_url(url),
+            )
+            return state
 
-        robots_url = f"{self.config.base_url}/robots.txt"
+        robots_url = adapter.robots_url(url)
         try:
             request = urllib.request.Request(
                 robots_url,
                 headers={"User-Agent": self.config.user_agent, "Accept": "text/plain"},
             )
-            self._wait_for_host()
-            with urllib.request.urlopen(request, timeout=self.config.request_timeout_seconds) as response:
-                body = response.read(1_000_001)
-                if len(body) > 1_000_000:
-                    raise WikiAgentError("upstream_error", "robots.txt exceeded the size limit")
-                text = body.decode("utf-8", errors="replace")
-        except (OSError, urllib.error.URLError) as exc:
+            body, _ = self._request(state, request, max_bytes=1_000_000)
+            text = body.decode("utf-8", errors="replace")
+        except (OSError, urllib.error.URLError, WikiAgentError):
             if saved:
-                self._set_robots(saved["body"], float(saved["checked_at"]))
-                return
-            # Fail conservatively: permit only the already restricted /wiki/ surface.
-            text = "User-agent: *\nAllow: /wiki/\nDisallow: /\n"
-            self._set_robots(text, 0)
-            return
+                self._set_robots(
+                    saved["body"],
+                    float(saved["checked_at"]),
+                    origin=origin,
+                    robots_url=robots_url,
+                )
+                return state
+            # Fail closed until the site's robots policy can be retrieved.
+            self._set_robots(
+                "User-agent: *\nDisallow: /\n",
+                0,
+                origin=origin,
+                robots_url=robots_url,
+            )
+            return state
 
-        self.cache.put_state("robots", {"body": text, "checked_at": now})
-        self._set_robots(text, now)
+        self.cache.put_state(state_key, {"body": text, "checked_at": now})
+        self._set_robots(text, now, origin=origin, robots_url=robots_url)
+        return state
 
-    def _set_robots(self, text: str, checked_at: float) -> None:
-        self._robots = urllib.robotparser.RobotFileParser()
-        self._robots.set_url(f"{self.config.base_url}/robots.txt")
-        self._robots.parse(text.splitlines())
-        delay = self._robots.crawl_delay(self.config.user_agent)
+    def _set_robots(
+        self,
+        text: str,
+        checked_at: float,
+        *,
+        origin: str | None = None,
+        robots_url: str | None = None,
+    ) -> None:
+        origin = origin or self.config.base_url
+        state = self._state(origin)
+        parser = urllib.robotparser.RobotFileParser()
+        parser.set_url(robots_url or f"{origin}/robots.txt")
+        parser.parse(text.splitlines())
+        delay = parser.crawl_delay(self.config.user_agent)
         if delay is None:
-            delay = self._robots.crawl_delay("*")
-        self._crawl_delay = max(self.config.crawl_delay_seconds, float(delay or 0))
-        self._robots_checked_at = checked_at
+            delay = parser.crawl_delay("*")
+        state.robots = parser
+        state.crawl_delay = max(self.config.crawl_delay_seconds, float(delay or 0))
+        state.robots_checked_at = checked_at
 
-    def _wait_for_host(self) -> None:
-        with self._host_lock:
-            elapsed = time.monotonic() - self._last_host_request
-            if elapsed < self._crawl_delay:
-                time.sleep(self._crawl_delay - elapsed)
-            self._last_host_request = time.monotonic()
+    def _request(
+        self,
+        state: HostState,
+        request: urllib.request.Request,
+        *,
+        max_bytes: int,
+    ) -> tuple[bytes, urllib.response.addinfourl]:
+        with state.lock:
+            elapsed = time.monotonic() - state.last_request
+            if elapsed < state.crawl_delay:
+                time.sleep(state.crawl_delay - elapsed)
+            state.last_request = time.monotonic()
+            response = urllib.request.build_opener(NoRedirectHandler()).open(
+                request,
+                timeout=self.config.request_timeout_seconds,
+            )
+            with response:
+                body = response.read(max_bytes + 1)
+                if len(body) > max_bytes:
+                    raise WikiAgentError("upstream_error", "Response exceeded the size limit")
+                return body, response
 
-    def fetch(self, url: str, *, cache_only: bool = False, ttl_seconds: int | None = None) -> FetchResult:
+    def _request_with_redirects(
+        self,
+        url: str,
+        adapter: SiteAdapter,
+        headers: dict[str, str],
+    ) -> tuple[bytes, urllib.response.addinfourl, SiteAdapter, str]:
+        current_url = url
+        current_adapter = adapter
+        current_headers = headers
+        for redirect_count in range(MAX_REDIRECTS + 1):
+            state = self.refresh_robots(current_adapter, current_url)
+            if not state.robots.can_fetch(self.config.user_agent, current_url):
+                raise WikiAgentError(
+                    "disallowed_by_robots",
+                    "robots.txt disallows this path",
+                )
+            request = urllib.request.Request(current_url, headers=current_headers)
+            try:
+                body, response = self._request(
+                    state,
+                    request,
+                    max_bytes=MAX_RESPONSE_BYTES,
+                )
+                return body, response, current_adapter, current_url
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {301, 302, 303, 307, 308}:
+                    raise
+                if redirect_count >= MAX_REDIRECTS:
+                    raise WikiAgentError(
+                        "upstream_error",
+                        "Site returned too many redirects",
+                    ) from exc
+                location = exc.headers.get("Location")
+                if not location:
+                    raise WikiAgentError(
+                        "upstream_error",
+                        "Site returned a redirect without a destination",
+                    ) from exc
+                destination = urllib.parse.urljoin(current_url, location)
+                current_adapter = self.registry.resolve(destination)
+                current_url = current_adapter.validate_url(destination)
+                current_headers = {
+                    key: value
+                    for key, value in headers.items()
+                    if key not in {"If-None-Match", "If-Modified-Since"}
+                }
+        raise WikiAgentError("upstream_error", "Site returned too many redirects")
+
+    def fetch(
+        self,
+        url: object,
+        *,
+        cache_only: bool = False,
+        ttl_seconds: int | None = None,
+    ) -> FetchResult:
         normalized = self.validate_url(url)
-        self.refresh_robots()
-        if not self._robots.can_fetch(self.config.user_agent, normalized):
+        adapter = self.registry.resolve(normalized)
+        state = self.refresh_robots(adapter, normalized)
+        if not state.robots.can_fetch(self.config.user_agent, normalized):
             raise WikiAgentError("disallowed_by_robots", "robots.txt disallows this path")
 
         ttl = self.config.cache_ttl_seconds if ttl_seconds is None else ttl_seconds
-        cached = self.cache.get(normalized)
+        cache_url = normalized
+        cache_adapter = adapter
+        redirect_state = self.cache.get_state(f"redirect:{normalized}")
+        if redirect_state:
+            try:
+                cache_url = self.validate_url(redirect_state["target"])
+                cache_adapter = self.registry.resolve(cache_url)
+            except (KeyError, TypeError, WikiAgentError):
+                cache_url = normalized
+                cache_adapter = adapter
+        if cache_url != normalized:
+            cache_state = self.refresh_robots(cache_adapter, cache_url)
+            if not cache_state.robots.can_fetch(self.config.user_agent, cache_url):
+                raise WikiAgentError(
+                    "disallowed_by_robots",
+                    "robots.txt disallows the cached redirect destination",
+                )
+        cached = self.cache.get(cache_url)
         if cached and cached.is_fresh(ttl):
-            return self._from_cache(cached, cached_flag=True)
+            return self._from_cache(
+                cached,
+                cached_flag=True,
+                provider=cache_adapter.name,
+            )
         if cache_only:
             if cached:
-                return self._from_cache(cached, cached_flag=True)
+                return self._from_cache(
+                    cached,
+                    cached_flag=True,
+                    provider=cache_adapter.name,
+                )
             raise WikiAgentError("not_cached", "No cached response exists for this URL")
 
         headers = {
@@ -188,48 +346,57 @@ class WikipediaFetcher:
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Encoding": "identity",
         }
-        if cached and cached.etag:
+        if cached and cache_url == normalized and cached.etag:
             headers["If-None-Match"] = cached.etag
-        if cached and cached.last_modified:
+        if cached and cache_url == normalized and cached.last_modified:
             headers["If-Modified-Since"] = cached.last_modified
 
         for attempt in range(self.config.max_retries + 1):
-            request = urllib.request.Request(normalized, headers=headers)
             try:
-                self._wait_for_host()
-                with urllib.request.urlopen(request, timeout=self.config.request_timeout_seconds) as response:
-                    body = response.read(MAX_RESPONSE_BYTES + 1)
-                    if len(body) > MAX_RESPONSE_BYTES:
-                        raise WikiAgentError("upstream_error", "Wikipedia response exceeded 10 MiB")
-                    content_type = response.headers.get("Content-Type")
-                    if content_type and "html" not in content_type.lower():
-                        raise WikiAgentError("parse_error", "Wikipedia returned a non-HTML response")
-                    entry = self.cache.put(
-                        normalized,
-                        body,
-                        etag=response.headers.get("ETag"),
-                        last_modified=response.headers.get("Last-Modified"),
-                        content_type=content_type,
-                    )
-                    return self._from_cache(entry, cached_flag=False)
+                body, response, final_adapter, final_url = self._request_with_redirects(
+                    normalized,
+                    adapter,
+                    headers,
+                )
+                content_type = response.headers.get("Content-Type")
+                if content_type and "html" not in content_type.lower():
+                    raise WikiAgentError("parse_error", "Site returned a non-HTML response")
+                entry = self.cache.put(
+                    final_url,
+                    body,
+                    etag=response.headers.get("ETag"),
+                    last_modified=response.headers.get("Last-Modified"),
+                    content_type=content_type,
+                )
+                self.cache.put_state(
+                    f"redirect:{normalized}",
+                    {"target": final_url},
+                )
+                return self._from_cache(
+                    entry,
+                    cached_flag=False,
+                    provider=final_adapter.name,
+                )
             except urllib.error.HTTPError as exc:
                 if exc.code == 304 and cached:
-                    return self._from_cache(self.cache.touch(cached), cached_flag=True)
+                    return self._from_cache(
+                        self.cache.touch(cached),
+                        cached_flag=True,
+                        provider=adapter.name,
+                    )
                 if exc.code in {429, 503} and attempt < self.config.max_retries:
                     time.sleep(min(self._retry_delay(exc.headers.get("Retry-After"), attempt), 60))
                     continue
-                if exc.code >= 500:
-                    raise WikiAgentError("upstream_error", f"Wikipedia returned HTTP {exc.code}") from exc
-                raise WikiAgentError("upstream_error", f"Wikipedia returned HTTP {exc.code}") from exc
+                raise WikiAgentError("upstream_error", f"Site returned HTTP {exc.code}") from exc
             except WikiAgentError:
                 raise
             except (OSError, urllib.error.URLError) as exc:
                 if attempt < self.config.max_retries:
                     time.sleep(self._retry_delay(None, attempt))
                     continue
-                raise WikiAgentError("upstream_error", "Failed to fetch Wikipedia") from exc
+                raise WikiAgentError("upstream_error", "Failed to fetch site") from exc
 
-        raise WikiAgentError("upstream_error", "Failed to fetch Wikipedia")
+        raise WikiAgentError("upstream_error", "Failed to fetch site")
 
     @staticmethod
     def _retry_delay(retry_after: str | None, attempt: int) -> float:
@@ -243,7 +410,12 @@ class WikipediaFetcher:
         return (2**attempt) + random.uniform(0, 0.5)
 
     @staticmethod
-    def _from_cache(entry: CacheEntry, *, cached_flag: bool) -> FetchResult:
+    def _from_cache(
+        entry: CacheEntry,
+        *,
+        cached_flag: bool,
+        provider: str,
+    ) -> FetchResult:
         return FetchResult(
             url=entry.url,
             body=entry.body,
@@ -252,4 +424,8 @@ class WikipediaFetcher:
             etag=entry.etag,
             last_modified=entry.last_modified,
             content_type=entry.content_type,
+            provider=provider,
         )
+
+
+WikipediaFetcher = PoliteFetcher
