@@ -22,6 +22,12 @@ class SiteAdapter(ABC):
     def robots_url(self, url: str) -> str:
         raise NotImplementedError
 
+    def validate_network_destination(self, url: str) -> tuple[str, ...] | None:
+        return None
+
+    def accepts_content_type(self, content_type: str | None) -> bool:
+        return content_type is None or "html" in content_type.lower()
+
     @abstractmethod
     def traverse(self, fetch: FetchResult, max_links: int, **options: Any) -> dict[str, Any]:
         raise NotImplementedError

@@ -19,15 +19,22 @@ def config(tmp_path):
     )
 
 
-def test_url_validation_restricts_origin_and_namespaces(tmp_path) -> None:
+def test_url_validation_routes_known_and_generic_sites(tmp_path) -> None:
     cache = Cache(tmp_path / "cache.sqlite3")
     fetcher = WikipediaFetcher(config(tmp_path), cache)
 
     assert fetcher.validate_url("https://en.wikipedia.org/wiki/Portal:Science") == (
         "https://en.wikipedia.org/wiki/Portal:Science"
     )
-    with pytest.raises(WikiAgentError, match="supported site"):
-        fetcher.validate_url("https://example.com/wiki/Test")
+    assert fetcher.validate_url("https://example.com/wiki/Test") == (
+        "https://example.com/wiki/Test"
+    )
+    with pytest.raises(WikiAgentError, match="public HTTPS"):
+        fetcher.validate_url("https://localhost/wiki/Test")
+    with pytest.raises(WikiAgentError, match="blocked"):
+        fetcher.validate_url("https://arxiv.org./search/?query=agents")
+    with pytest.raises(WikiAgentError, match="blocked"):
+        fetcher.validate_url("https://help.imdb.com./search/?q=account")
     with pytest.raises(WikiAgentError, match="special namespace"):
         fetcher.validate_url("https://en.wikipedia.org/wiki/Special:Random")
     assert fetcher.validate_url("https://en.wikipedia.org/wiki/100%25_(album)") == (

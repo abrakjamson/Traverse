@@ -18,7 +18,8 @@ HTML = b"""
             <tr><td><img src="//upload.wikimedia.org/example.png"></td></tr>
           </table>
           <p>Quantum tunnelling is a quantum effect <sup class="reference">[1]</sup>
-            involving a <a href="/wiki/Potential_barrier">potential barrier</a>.</p>
+            involving a <a href="/wiki/Potential_barrier">potential barrier</a>.
+            See the <a href="https://example.org/paper?id=1#results">original paper</a>.</p>
         </section>
         <section id="mechanism-wrapper">
           <div class="mw-heading mw-heading2"><h2 id="Mechanism">Mechanism</h2></div>
@@ -66,7 +67,7 @@ def fetched() -> FetchResult:
 
 
 def test_traverse_extracts_normalized_links() -> None:
-    result = traverse(fetched(), 2, context_max_chars=30)
+    result = traverse(fetched(), 2, page_types=["article"], context_max_chars=30)
 
     assert result["title"] == "Quantum tunnelling"
     assert result["meta"]["page_type"] == "article"
@@ -86,6 +87,29 @@ def test_traverse_filters_and_paginates_links() -> None:
     assert first["meta"]["next_offset"] == 1
     assert second["links"][0]["href"] == "/wiki/Barrier_potential"
     assert second["meta"]["next_offset"] is None
+
+
+def test_traverse_exposes_external_https_links() -> None:
+    result = traverse(
+        fetched(),
+        10,
+        query="original paper",
+        page_types=["external"],
+        namespaces=["external"],
+    )
+
+    assert result["links"] == [
+        {
+            "href": "https://example.org/paper?id=1",
+            "text": "original paper",
+            "context": (
+                "Quantum tunnelling is a quantum effect involving a potential barrier. "
+                "See the original paper."
+            ),
+            "page_type": "external",
+            "namespace": "external",
+        }
+    ]
 
 
 def test_colon_in_article_title_is_not_treated_as_namespace() -> None:

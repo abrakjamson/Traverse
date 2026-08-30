@@ -178,6 +178,7 @@ class StdioServer:
                     "abstract",
                     "article",
                     "category",
+                    "external",
                     "index",
                     "listing",
                     "other",
@@ -249,7 +250,11 @@ class StdioServer:
 
         metadata = {key: value for key, value in result.items() if key not in {"text", "html", "skim"}}
         self._write_response(request["id"], metadata)
-        chunk_source = result["html"] if output_format == "html" else result["text"]
+        chunk_source = (
+            result["html"]
+            if output_format == "html" and result["html"] is not None
+            else result["text"]
+        )
         chunks = [chunk_source[index : index + 8192] for index in range(0, len(chunk_source), 8192)] or [""]
         for index, chunk in enumerate(chunks, start=1):
             self._write(

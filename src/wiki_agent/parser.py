@@ -10,7 +10,7 @@ from lxml import etree, html
 
 from .errors import WikiAgentError
 from .fetcher import FetchResult
-from .urls import BLOCKED_NAMESPACES, namespace_for_title
+from .urls import BLOCKED_NAMESPACES, namespace_for_title, normalize_external_https_url
 
 
 CITATION_RE = re.compile(r"\[(?:\d+|citation needed|note \d+)\]", re.IGNORECASE)
@@ -92,6 +92,19 @@ def relative_wiki_href(value: str | None) -> str | None:
         return None
     path = urllib.parse.quote(decoded_path, safe="/:()_")
     return path
+
+
+def discovery_href(value: str | None) -> str | None:
+    internal = relative_wiki_href(value)
+    if internal:
+        return internal
+    external = normalize_external_https_url(
+        value,
+        "https://en.wikipedia.org",
+    )
+    if urllib.parse.urlsplit(external or "").hostname == "en.wikipedia.org":
+        return None
+    return external
 
 
 def page_type(url: str) -> str:
@@ -221,7 +234,7 @@ def extract_links(nodes: Iterable[etree._Element], limit: int) -> list[dict[str,
     for node in nodes:
         anchors = [node] if node.tag == "a" else node.xpath(".//a[@href]")
         for anchor in anchors:
-            href = relative_wiki_href(anchor.get("href"))
+            href = discovery_href(anchor.get("href"))
             text = clean_text(anchor.text_content())
             if not href or not text or href in seen:
                 continue
@@ -482,7 +495,7 @@ def traverse(
     allowed_page_types = set(page_types or [])
     allowed_namespaces = {namespace.casefold().replace(" ", "_") for namespace in namespaces or []}
     for anchor in root.xpath(".//a[@href]"):
-        href = relative_wiki_href(anchor.get("href"))
+        href = discovery_href(anchor.get("href"))
         text = clean_text(anchor.text_content())
         if not href or not text or href in seen:
             continue
@@ -497,8 +510,9 @@ def traverse(
             context_node = context_node.getparent()
             remaining_levels -= 1
         context = element_text(context_node) if context_node.tag in {"p", "li", "td"} else text
-        target_page_type = link_page_type(href)
-        namespace = link_namespace(href)
+        external = urllib.parse.urlsplit(href).hostname is not None
+        target_page_type = "external" if external else link_page_type(href)
+        namespace = "external" if external else link_namespace(href)
         if allowed_page_types and target_page_type not in allowed_page_types:
             continue
         if allowed_namespaces and namespace not in allowed_namespaces:

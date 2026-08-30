@@ -5,6 +5,7 @@ from ..errors import WikiAgentError
 from .arxiv import ArxivAdapter
 from .base import SiteAdapter
 from .imdb import ImdbAdapter
+from .web import WebAdapter
 from .wikipedia import WikipediaAdapter
 
 
@@ -33,5 +34,6 @@ def build_registry(config: Config) -> ProviderRegistry:
             WikipediaAdapter(config.base_url),
             ImdbAdapter(),
             ArxivAdapter(),
+            WebAdapter(),
         ]
     )

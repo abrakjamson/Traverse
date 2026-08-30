@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from lxml import etree, html
 
 from ..errors import WikiAgentError
+from ..urls import normalize_external_https_url
 from .base import SiteAdapter
 
 if TYPE_CHECKING:
@@ -34,15 +35,86 @@ def element_text(node: etree._Element) -> str:
 
 def sanitized_html(root: etree._Element) -> str:
     clone = deepcopy(root)
-    for node in clone.xpath(".//script|.//style|.//noscript|.//iframe|.//object|.//embed|.//form"):
+    for node in clone.xpath(
+        ".//script|.//style|.//noscript|.//iframe|.//object|.//embed|.//form|"
+        ".//svg|.//math|.//meta|.//link|.//base|.//template"
+    ):
         node.drop_tree()
-    for node in clone.iter():
+    allowed_tags = {
+        "a",
+        "article",
+        "b",
+        "blockquote",
+        "body",
+        "br",
+        "caption",
+        "code",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "figcaption",
+        "figure",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "img",
+        "li",
+        "main",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "span",
+        "strong",
+        "sub",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "time",
+        "tr",
+        "u",
+        "ul",
+    }
+    global_attributes = {"class", "dir", "id", "lang", "title"}
+    tag_attributes = {
+        "a": {"href"},
+        "img": {"alt", "height", "src", "width"},
+        "td": {"colspan", "rowspan"},
+        "th": {"colspan", "rowspan", "scope"},
+        "time": {"datetime"},
+    }
+    for node in list(clone.iter()):
+        if not isinstance(node.tag, str):
+            parent = node.getparent()
+            if parent is not None:
+                parent.remove(node)
+            continue
+        if node.tag.lower() not in allowed_tags:
+            node.drop_tag()
+            continue
         for attribute in list(node.attrib):
-            value = node.attrib[attribute].strip().lower()
-            if attribute.lower().startswith("on") or (
-                attribute.lower() in {"href", "src", "xlink:href"} and value.startswith("javascript:")
+            attribute_lower = attribute.lower()
+            if (
+                attribute_lower not in global_attributes
+                and attribute_lower not in tag_attributes.get(node.tag.lower(), set())
             ):
                 del node.attrib[attribute]
+                continue
+            if attribute_lower in {"href", "src"}:
+                value = node.attrib[attribute].strip()
+                if not value.startswith("https://"):
+                    del node.attrib[attribute]
     return etree.tostring(clone, encoding="unicode", method="html")
 
 
@@ -94,7 +166,9 @@ class GenericHtmlAdapter(SiteAdapter):
 
     def robots_url(self, url: str) -> str:
         parsed = urllib.parse.urlsplit(url)
-        return f"https://{parsed.hostname}/robots.txt"
+        hostname = parsed.hostname or ""
+        authority = f"[{hostname}]" if ":" in hostname else hostname
+        return f"https://{authority}/robots.txt"
 
     def normalize_link(self, value: str | None, base_url: str) -> str | None:
         if not value or value.startswith(("javascript:", "mailto:", "tel:")):
@@ -105,9 +179,32 @@ class GenericHtmlAdapter(SiteAdapter):
         except WikiAgentError:
             return None
 
+    def discovery_link(self, value: str | None, base_url: str) -> str | None:
+        internal = self.normalize_link(value, base_url)
+        if internal:
+            return internal
+        external = normalize_external_https_url(value, base_url)
+        if not external:
+            return None
+        if urllib.parse.urlsplit(external).hostname == urllib.parse.urlsplit(base_url).hostname:
+            return None
+        return external
+
     def parse(self, fetch: FetchResult) -> tuple[html.HtmlElement, etree._Element]:
         try:
-            document = html.fromstring(fetch.body)
+            encoding = None
+            if fetch.content_type:
+                match = re.search(
+                    r"charset\s*=\s*[\"']?([^;\"'\s]+)",
+                    fetch.content_type,
+                    re.IGNORECASE,
+                )
+                if match:
+                    encoding = match.group(1)
+            document = html.fromstring(
+                fetch.body,
+                parser=html.HTMLParser(encoding=encoding),
+            )
             document.make_links_absolute(fetch.url)
         except (etree.ParserError, ValueError) as exc:
             raise WikiAgentError("parse_error", f"Unable to parse {self.name} HTML") from exc
@@ -196,7 +293,7 @@ class GenericHtmlAdapter(SiteAdapter):
         seen: set[str] = set()
         for node in nodes:
             for anchor in node.xpath(".//a[@href]"):
-                href = self.normalize_link(anchor.get("href"), base_url)
+                href = self.discovery_link(anchor.get("href"), base_url)
                 text = clean_text(anchor.text_content())
                 if not href or not text or href in seen:
                     continue
@@ -222,11 +319,15 @@ class GenericHtmlAdapter(SiteAdapter):
         offset = options.get("offset", 0)
         context_max_chars = options.get("context_max_chars", 240)
         page_types = set(options.get("page_types") or [])
+        namespaces = {
+            value.casefold().replace(" ", "_")
+            for value in options.get("namespaces") or []
+        }
         normalized_query = query.casefold().strip() if query else None
         matches: list[dict[str, str]] = []
         seen: set[str] = set()
         for anchor in root.xpath(".//a[@href]"):
-            href = self.normalize_link(anchor.get("href"), fetch.url)
+            href = self.discovery_link(anchor.get("href"), fetch.url)
             text = clean_text(anchor.text_content())
             if not href or not text or href in seen:
                 continue
@@ -239,8 +340,15 @@ class GenericHtmlAdapter(SiteAdapter):
                     break
                 context_node = context_node.getparent()
             context = element_text(context_node)
-            target_type = self.page_type(href)
+            external = (
+                urllib.parse.urlsplit(href).hostname
+                != urllib.parse.urlsplit(fetch.url).hostname
+            )
+            target_type = "external" if external else self.page_type(href)
+            namespace = "external" if external else self.name
             if page_types and target_type not in page_types:
+                continue
+            if namespaces and namespace not in namespaces:
                 continue
             if normalized_query and normalized_query not in f"{text} {href} {context}".casefold():
                 continue
@@ -250,7 +358,7 @@ class GenericHtmlAdapter(SiteAdapter):
                     "text": text,
                     "context": context[:context_max_chars],
                     "page_type": target_type,
-                    "namespace": self.name,
+                    "namespace": namespace,
                 }
             )
             if len(matches) >= offset + max_links + 1:
@@ -269,7 +377,11 @@ class GenericHtmlAdapter(SiteAdapter):
                     "link_count": len(links),
                     "offset": offset,
                     "next_offset": offset + len(links) if has_more else None,
-                    "filters": {"query": query, "page_types": list(page_types) or None},
+                    "filters": {
+                        "query": query,
+                        "page_types": list(page_types) or None,
+                        "namespaces": list(namespaces) or None,
+                    },
                 },
             ),
         }

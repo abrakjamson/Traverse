@@ -50,6 +50,7 @@ def create_mcp_server(config: Config) -> FastMCP:
             "abstract",
             "article",
             "category",
+            "external",
             "index",
             "listing",
             "other",
@@ -100,7 +101,7 @@ def create_mcp_server(config: Config) -> FastMCP:
 
     @mcp.tool()
     def read(url: str, format: str = "plain") -> dict[str, Any]:
-        """Retrieve full simplified text or sanitized HTML from a supported page."""
+        """Retrieve full simplified text or sanitized HTML from a supported or public HTTPS page."""
         if format not in {"plain", "html"}:
             raise ValueError("format must be plain or html")
         try:

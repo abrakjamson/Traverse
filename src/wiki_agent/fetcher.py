@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import email.utils
+import http.client
 import random
+import socket
 import threading
 import time
 import urllib.error
@@ -28,6 +30,48 @@ MAX_REDIRECTS = 5
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, *, addresses: tuple[str, ...], **kwargs):
+        super().__init__(host, **kwargs)
+        self._addresses = addresses
+
+    def connect(self) -> None:
+        last_error: OSError | None = None
+        for address in self._addresses:
+            try:
+                sock = socket.create_connection(
+                    (address, self.port),
+                    self.timeout,
+                    self.source_address,
+                )
+                self.sock = self._context.wrap_socket(
+                    sock,
+                    server_hostname=self.host,
+                )
+                return
+            except OSError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OSError("No validated addresses are available")
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, addresses: tuple[str, ...]):
+        super().__init__()
+        self._addresses = addresses
+
+    def https_open(self, request):
+        return self.do_open(
+            lambda host, **kwargs: PinnedHTTPSConnection(
+                host,
+                addresses=self._addresses,
+                **kwargs,
+            ),
+            request,
+        )
 
 
 def iso_timestamp(timestamp: float | None = None) -> str:
@@ -128,7 +172,23 @@ class PoliteFetcher:
     def validate_url(self, value: object) -> str:
         if not isinstance(value, str):
             raise WikiAgentError("invalid_request", "url must be a non-empty string")
-        return self.registry.resolve(value).validate_url(value)
+        _, normalized = self._resolve_adapter(value)
+        return normalized
+
+    def _resolve_adapter(self, value: str) -> tuple[SiteAdapter, str]:
+        current = value
+        previous_adapter: SiteAdapter | None = None
+        for _ in range(len(self.registry.adapters) + 1):
+            adapter = self.registry.resolve(current)
+            normalized = adapter.validate_url(current)
+            if adapter is previous_adapter and normalized == current:
+                return adapter, normalized
+            resolved = self.registry.resolve(normalized)
+            if resolved is adapter:
+                return adapter, normalized
+            previous_adapter = adapter
+            current = normalized
+        raise WikiAgentError("invalid_request", "url provider resolution did not stabilize")
 
     def _origin(self, url: str) -> str:
         parsed = urllib.parse.urlsplit(url)
@@ -148,7 +208,13 @@ class PoliteFetcher:
                 self._states[origin] = state
             return state
 
-    def refresh_robots(self, adapter: SiteAdapter, url: str, force: bool = False) -> HostState:
+    def refresh_robots(
+        self,
+        adapter: SiteAdapter,
+        url: str,
+        force: bool = False,
+        network_addresses: tuple[str, ...] | None = None,
+    ) -> HostState:
         origin = self._origin(url)
         state = self._state(origin)
         now = time.time()
@@ -180,17 +246,14 @@ class PoliteFetcher:
                 robots_url,
                 headers={"User-Agent": self.config.user_agent, "Accept": "text/plain"},
             )
-            body, _ = self._request(state, request, max_bytes=1_000_000)
+            body, _ = self._request(
+                state,
+                request,
+                max_bytes=1_000_000,
+                network_addresses=network_addresses,
+            )
             text = body.decode("utf-8", errors="replace")
         except (OSError, urllib.error.URLError, WikiAgentError):
-            if saved:
-                self._set_robots(
-                    saved["body"],
-                    float(saved["checked_at"]),
-                    origin=origin,
-                    robots_url=robots_url,
-                )
-                return state
             # Fail closed until the site's robots policy can be retrieved.
             self._set_robots(
                 "User-agent: *\nDisallow: /\n",
@@ -230,13 +293,21 @@ class PoliteFetcher:
         request: urllib.request.Request,
         *,
         max_bytes: int,
+        network_addresses: tuple[str, ...] | None = None,
     ) -> tuple[bytes, urllib.response.addinfourl]:
         with state.lock:
             elapsed = time.monotonic() - state.last_request
             if elapsed < state.crawl_delay:
                 time.sleep(state.crawl_delay - elapsed)
             state.last_request = time.monotonic()
-            response = urllib.request.build_opener(NoRedirectHandler()).open(
+            handlers: list[urllib.request.BaseHandler] = [NoRedirectHandler()]
+            if network_addresses is not None:
+                handlers = [
+                    urllib.request.ProxyHandler({}),
+                    NoRedirectHandler(),
+                    PinnedHTTPSHandler(network_addresses),
+                ]
+            response = urllib.request.build_opener(*handlers).open(
                 request,
                 timeout=self.config.request_timeout_seconds,
             )
@@ -251,12 +322,18 @@ class PoliteFetcher:
         url: str,
         adapter: SiteAdapter,
         headers: dict[str, str],
+        initial_network_addresses: tuple[str, ...] | None,
     ) -> tuple[bytes, urllib.response.addinfourl, SiteAdapter, str]:
         current_url = url
         current_adapter = adapter
         current_headers = headers
+        network_addresses = initial_network_addresses
         for redirect_count in range(MAX_REDIRECTS + 1):
-            state = self.refresh_robots(current_adapter, current_url)
+            state = self.refresh_robots(
+                current_adapter,
+                current_url,
+                network_addresses=network_addresses,
+            )
             if not state.robots.can_fetch(self.config.user_agent, current_url):
                 raise WikiAgentError(
                     "disallowed_by_robots",
@@ -268,6 +345,7 @@ class PoliteFetcher:
                     state,
                     request,
                     max_bytes=MAX_RESPONSE_BYTES,
+                    network_addresses=network_addresses,
                 )
                 return body, response, current_adapter, current_url
             except urllib.error.HTTPError as exc:
@@ -285,8 +363,10 @@ class PoliteFetcher:
                         "Site returned a redirect without a destination",
                     ) from exc
                 destination = urllib.parse.urljoin(current_url, location)
-                current_adapter = self.registry.resolve(destination)
-                current_url = current_adapter.validate_url(destination)
+                current_adapter, current_url = self._resolve_adapter(destination)
+                network_addresses = current_adapter.validate_network_destination(
+                    current_url
+                )
                 current_headers = {
                     key: value
                     for key, value in headers.items()
@@ -301,9 +381,15 @@ class PoliteFetcher:
         cache_only: bool = False,
         ttl_seconds: int | None = None,
     ) -> FetchResult:
-        normalized = self.validate_url(url)
-        adapter = self.registry.resolve(normalized)
-        state = self.refresh_robots(adapter, normalized)
+        if not isinstance(url, str):
+            raise WikiAgentError("invalid_request", "url must be a non-empty string")
+        adapter, normalized = self._resolve_adapter(url)
+        network_addresses = adapter.validate_network_destination(normalized)
+        state = self.refresh_robots(
+            adapter,
+            normalized,
+            network_addresses=network_addresses,
+        )
         if not state.robots.can_fetch(self.config.user_agent, normalized):
             raise WikiAgentError("disallowed_by_robots", "robots.txt disallows this path")
 
@@ -313,13 +399,21 @@ class PoliteFetcher:
         redirect_state = self.cache.get_state(f"redirect:{normalized}")
         if redirect_state:
             try:
-                cache_url = self.validate_url(redirect_state["target"])
-                cache_adapter = self.registry.resolve(cache_url)
+                cache_adapter, cache_url = self._resolve_adapter(
+                    redirect_state["target"]
+                )
             except (KeyError, TypeError, WikiAgentError):
                 cache_url = normalized
                 cache_adapter = adapter
         if cache_url != normalized:
-            cache_state = self.refresh_robots(cache_adapter, cache_url)
+            cache_network_addresses = cache_adapter.validate_network_destination(
+                cache_url
+            )
+            cache_state = self.refresh_robots(
+                cache_adapter,
+                cache_url,
+                network_addresses=cache_network_addresses,
+            )
             if not cache_state.robots.can_fetch(self.config.user_agent, cache_url):
                 raise WikiAgentError(
                     "disallowed_by_robots",
@@ -357,10 +451,11 @@ class PoliteFetcher:
                     normalized,
                     adapter,
                     headers,
+                    network_addresses,
                 )
                 content_type = response.headers.get("Content-Type")
-                if content_type and "html" not in content_type.lower():
-                    raise WikiAgentError("parse_error", "Site returned a non-HTML response")
+                if not final_adapter.accepts_content_type(content_type):
+                    raise WikiAgentError("parse_error", "Site returned an unsupported content type")
                 entry = self.cache.put(
                     final_url,
                     body,
