@@ -6,6 +6,7 @@ from wiki_agent.errors import WikiAgentError
 from wiki_agent.fetcher import FetchResult
 from wiki_agent.providers.arxiv import ArxivAdapter
 from wiki_agent.providers.imdb import ImdbAdapter
+from wiki_agent.providers.nerdwallet import NerdWalletAdapter
 from wiki_agent.providers.web import WebAdapter
 
 
@@ -117,6 +118,159 @@ def test_arxiv_abstract_extracts_metadata_and_abstract() -> None:
         {"key": "Subjects", "value": "Subjects: Artificial Intelligence (cs.AI)"},
         {"key": "Submission history", "value": "Submitted 1 January 2024"},
     ]
+
+
+def test_nerdwallet_blocks_search_routes_and_queries() -> None:
+    adapter = NerdWalletAdapter()
+
+    for url in (
+        "https://www.nerdwallet.com/search/cards",
+        "https://www.nerdwallet.com/wp-json/wp/v2/search?search=cards",
+        "https://www.nerdwallet.com/credit-cards?s=travel",
+    ):
+        with pytest.raises(WikiAgentError, match="blocked|search"):
+            adapter.validate_url(url)
+
+    assert adapter.validate_url(
+        "https://www.nerdwallet.com/credit-cards/best/travel?utm_source=test"
+    ) == "https://www.nerdwallet.com/credit-cards/best/travel"
+    assert adapter.request_headers() == {"Accept-Language": "en-US,en;q=0.9"}
+
+
+def test_nerdwallet_traverses_wordpress_sitemap() -> None:
+    adapter = NerdWalletAdapter()
+    source = fetched(
+        "https://www.nerdwallet.com/sitemaps/us/wp-sitemap-posts-articles-1.xml",
+        b"""<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url>
+            <loc>https://www.nerdwallet.com/banking/best/checking-accounts</loc>
+            <lastmod>2026-08-28T00:00:00-07:00</lastmod>
+          </url>
+          <url>
+            <loc>https://www.nerdwallet.com/finance/learn/make-a-budget</loc>
+            <lastmod>2026-08-20T00:00:00-07:00</lastmod>
+          </url>
+        </urlset>
+        """,
+        "nerdwallet",
+    )
+    source = FetchResult(
+        url=source.url,
+        body=source.body,
+        fetched_at=source.fetched_at,
+        cached=source.cached,
+        etag=source.etag,
+        last_modified=source.last_modified,
+        content_type="application/xml; charset=utf-8",
+        provider=source.provider,
+    )
+
+    result = adapter.traverse(source, 10, query="checking")
+
+    assert result["links"] == [
+        {
+            "href": "https://www.nerdwallet.com/banking/best/checking-accounts",
+            "text": "checking accounts",
+            "context": "Last modified: 2026-08-28T00:00:00-07:00",
+            "page_type": "listing",
+            "namespace": "nerdwallet",
+        }
+    ]
+    assert result["meta"]["provider"] == "nerdwallet"
+
+
+def test_nerdwallet_extracts_wordpress_json_ld_metadata() -> None:
+    adapter = NerdWalletAdapter()
+    source = fetched(
+        "https://www.nerdwallet.com/finance/learn/make-a-budget",
+        b"""
+        <html><head>
+          <link rel="canonical" href="https://www.nerdwallet.com/finance/learn/make-a-budget">
+          <script type="application/ld+json">
+            {
+              "@type": "ItemList",
+              "itemListElement": [{
+                "@type": "Article",
+                "author": {"name": "Nested Recommendation"}
+              }]
+            }
+          </script>
+          <script type="application/ld+json">
+            {
+              "@type": "Article",
+              "url": "https://www.nerdwallet.com/finance/learn/make-a-budget",
+              "author": [{"@type": "Person", "name": "Ada Nerd"}],
+              "datePublished": "2026-01-02",
+              "dateModified": "2026-08-20",
+              "image": "https://www.nerdwallet.com/image.jpg"
+            }
+          </script>
+        </head><body><main>
+          <h1>How to Make a Budget</h1>
+          <p>Ada Nerd is a personal finance writer at NerdWallet covering budgeting and saving.</p>
+          <p>A practical budgeting guide.</p>
+          <p>This practical budgeting guide explains how to organize expenses and build a plan that works over time.</p>
+        </main></body></html>
+        """,
+        "nerdwallet",
+    )
+
+    result = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+
+    assert result["title"] == "How to Make a Budget"
+    assert result["infobox"]["fields"] == [
+        {"key": "Author", "value": "Ada Nerd"},
+        {"key": "Published", "value": "2026-01-02"},
+        {"key": "Updated", "value": "2026-08-20"},
+    ]
+    assert result["infobox"]["image"] == "https://www.nerdwallet.com/image.jpg"
+    assert result["lead"].startswith("This practical budgeting guide")
+
+
+def test_nerdwallet_traverses_wordpress_feed() -> None:
+    adapter = NerdWalletAdapter()
+    source = FetchResult(
+        url="https://www.nerdwallet.com/blog/feed/",
+        body=b"""<?xml version="1.0"?>
+        <rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel>
+          <item>
+            <title>Best Travel Cards</title>
+            <link>https://www.nerdwallet.com/credit-cards/best/travel</link>
+            <dc:creator>Ada Nerd</dc:creator>
+            <pubDate>Fri, 28 Aug 2026 18:00:00 +0000</pubDate>
+            <description>Compare current travel card options.</description>
+          </item>
+        </channel></rss>
+        """,
+        fetched_at="2026-08-30T00:00:00Z",
+        cached=False,
+        etag=None,
+        last_modified=None,
+        content_type="application/rss+xml; charset=UTF-8",
+        provider="nerdwallet",
+    )
+
+    result = adapter.traverse(source, 10, query="travel")
+
+    assert result["links"] == [
+        {
+            "href": "https://www.nerdwallet.com/credit-cards/best/travel",
+            "text": "Best Travel Cards",
+            "context": (
+                "Fri, 28 Aug 2026 18:00:00 +0000 | Ada Nerd | "
+                "Compare current travel card options."
+            ),
+            "page_type": "article",
+            "namespace": "nerdwallet",
+        }
+    ]
+    skim = adapter.skim(
+        source,
+        selected_sections=["missing"],
+        max_links_per_section=5,
+    )
+    assert skim["sections"] == []
 
 
 def test_web_adapter_parses_public_https_and_external_links(monkeypatch) -> None:

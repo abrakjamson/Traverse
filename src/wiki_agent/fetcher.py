@@ -368,10 +368,11 @@ class PoliteFetcher:
                     current_url
                 )
                 current_headers = {
-                    key: value
-                    for key, value in headers.items()
-                    if key not in {"If-None-Match", "If-Modified-Since"}
+                    "User-Agent": self.config.user_agent,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Encoding": "identity",
                 }
+                current_headers.update(current_adapter.request_headers())
         raise WikiAgentError("upstream_error", "Site returned too many redirects")
 
     def fetch(
@@ -439,6 +440,7 @@ class PoliteFetcher:
             "User-Agent": self.config.user_agent,
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Encoding": "identity",
+            **adapter.request_headers(),
         }
         if cached and cache_url == normalized and cached.etag:
             headers["If-None-Match"] = cached.etag

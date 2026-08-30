@@ -73,6 +73,21 @@ def test_rate_limiter_reports_retry_after() -> None:
     assert caught.value.details == {"retry_after_seconds": 1}
 
 
+def test_robots_crawl_delay_overrides_default(tmp_path) -> None:
+    cache = Cache(tmp_path / "cache.sqlite3")
+    fetcher = WikipediaFetcher(config(tmp_path), cache)
+
+    fetcher._set_robots(
+        "User-agent: *\nAllow: /\nCrawl-delay: 4\n",
+        time.time(),
+        origin="https://www.nerdwallet.com",
+        robots_url="https://www.nerdwallet.com/robots.txt",
+    )
+
+    assert fetcher.provider_status()[0]["crawl_delay_seconds"] == 4
+    cache.close()
+
+
 def test_fetch_rejects_non_string_url(tmp_path) -> None:
     cache = Cache(tmp_path / "cache.sqlite3")
     fetcher = WikipediaFetcher(config(tmp_path), cache)

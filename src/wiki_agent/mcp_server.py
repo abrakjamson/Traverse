@@ -39,7 +39,7 @@ def create_mcp_server(config: Config) -> FastMCP:
         offset: int = 0,
         context_max_chars: int = 240,
     ) -> dict[str, Any]:
-        """Discover filtered, paginated links from Wikipedia, IMDb Help, or arXiv."""
+        """Discover links from Wikipedia, IMDb Help, arXiv, NerdWallet, or public HTTPS pages."""
         if not 1 <= max_links <= 200:
             raise ValueError("max_links must be from 1 to 200")
         if offset < 0:

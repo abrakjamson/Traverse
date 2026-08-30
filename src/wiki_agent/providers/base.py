@@ -28,6 +28,9 @@ class SiteAdapter(ABC):
     def accepts_content_type(self, content_type: str | None) -> bool:
         return content_type is None or "html" in content_type.lower()
 
+    def request_headers(self) -> dict[str, str]:
+        return {}
+
     @abstractmethod
     def traverse(self, fetch: FetchResult, max_links: int, **options: Any) -> dict[str, Any]:
         raise NotImplementedError
