@@ -6,6 +6,8 @@ from .arxiv import ArxivAdapter
 from .base import SiteAdapter
 from .imdb import ImdbAdapter
 from .nerdwallet import NerdWalletAdapter
+from .npr import NprAdapter
+from .fred import FredAdapter
 from .web import WebAdapter
 from .wikipedia import WikipediaAdapter
 
@@ -36,6 +38,8 @@ def build_registry(config: Config) -> ProviderRegistry:
             ImdbAdapter(),
             ArxivAdapter(),
             NerdWalletAdapter(),
+            NprAdapter(),
+            FredAdapter(),
             WebAdapter(),
         ]
     )

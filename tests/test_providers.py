@@ -7,6 +7,8 @@ from wiki_agent.fetcher import FetchResult
 from wiki_agent.providers.arxiv import ArxivAdapter
 from wiki_agent.providers.imdb import ImdbAdapter
 from wiki_agent.providers.nerdwallet import NerdWalletAdapter
+from wiki_agent.providers.npr import NprAdapter
+from wiki_agent.providers.fred import FredAdapter
 from wiki_agent.providers.web import WebAdapter
 
 
@@ -271,6 +273,175 @@ def test_nerdwallet_traverses_wordpress_feed() -> None:
         max_links_per_section=5,
     )
     assert skim["sections"] == []
+
+
+def test_npr_blocks_search_and_query_urls() -> None:
+    adapter = NprAdapter()
+
+    for url in (
+        "https://www.npr.org/templates/search/index.php",
+        "https://www.npr.org/sections/news/?page=2",
+        "https://www.npr.org/account/login",
+    ):
+        with pytest.raises(WikiAgentError, match="blocked|query"):
+            adapter.validate_url(url)
+
+    assert adapter.validate_url(
+        "https://www.npr.org/2026/08/30/123456789/example-story"
+    ) == "https://www.npr.org/2026/08/30/123456789/example-story"
+    assert adapter.validate_url(
+        "https://npr.org/2026/08/30/123456789/example-story"
+    ) == "https://www.npr.org/2026/08/30/123456789/example-story"
+    with pytest.raises(WikiAgentError, match="blocked"):
+        adapter.validate_url("https://www.npr.org/newsletter/news")
+    assert adapter.discovery_link("https://example.com/story", "https://www.npr.org/") is None
+
+
+def test_npr_traverses_live_update_sitemap() -> None:
+    adapter = NprAdapter()
+    source = FetchResult(
+        url="https://www.npr.org/live-updates/sitemap.xml",
+        body=b"""<?xml version="1.0"?>
+        <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <sitemap>
+            <loc>https://www.npr.org/live-updates/sitemap-latest.xml</loc>
+            <lastmod>2026-08-30T12:00:00-04:00</lastmod>
+          </sitemap>
+        </sitemapindex>
+        """,
+        fetched_at="2026-08-30T00:00:00Z",
+        cached=False,
+        etag=None,
+        last_modified=None,
+        content_type="text/xml; charset=UTF-8",
+        provider="npr",
+    )
+
+    result = adapter.traverse(source, 10, query="latest")
+
+    assert result["links"] == [
+        {
+            "href": "https://www.npr.org/live-updates/sitemap-latest.xml",
+            "text": "sitemap latest.xml",
+            "context": "Last modified: 2026-08-30T12:00:00-04:00",
+            "page_type": "listing",
+            "namespace": "npr",
+        }
+    ]
+    assert adapter.page_type(
+        "https://www.npr.org/live-updates/example-event"
+    ) == "article"
+
+
+def test_npr_extracts_article_metadata() -> None:
+    adapter = NprAdapter()
+    source = fetched(
+        "https://www.npr.org/2026/08/30/123456789/example-story",
+        b"""
+        <html><head><script type="application/ld+json">
+          {
+            "@type": "NewsArticle",
+            "author": [{"name": "Ada Reporter"}],
+            "datePublished": "2026-08-30T10:00:00-04:00",
+            "image": {"url": "https://media.npr.org/image.jpg"}
+          }
+        </script></head><body><main><article>
+          <h1>Example Story</h1>
+          <p>This is a sufficiently detailed opening paragraph for an NPR news article used in parser testing.</p>
+        </article></main></body></html>
+        """,
+        "npr",
+    )
+
+    result = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+
+    assert result["title"] == "Example Story"
+    assert result["infobox"] == {
+        "image": "https://media.npr.org/image.jpg",
+        "fields": [
+            {"key": "Author", "value": "Ada Reporter"},
+            {"key": "Published", "value": "2026-08-30T10:00:00-04:00"},
+        ],
+    }
+
+
+def test_fred_blocks_search_and_validates_csv_queries() -> None:
+    adapter = FredAdapter()
+
+    with pytest.raises(WikiAgentError, match="search"):
+        adapter.validate_url("https://fred.stlouisfed.org/search?st=inflation")
+    with pytest.raises(WikiAgentError, match="valid id"):
+        adapter.validate_url("https://fred.stlouisfed.org/graph/fredgraph.csv")
+    with pytest.raises(WikiAgentError, match="YYYY-MM-DD"):
+        adapter.validate_url(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026"
+        )
+    with pytest.raises(WikiAgentError, match="unsupported parameter"):
+        adapter.validate_url(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&pageID=2"
+        )
+    with pytest.raises(WikiAgentError, match="must not be repeated"):
+        adapter.validate_url(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&id=GDP"
+        )
+
+    assert adapter.validate_url(
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-08-01"
+    ) == (
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-08-01"
+    )
+    assert adapter.validate_url(
+        "https://fred.stlouisfed.org/tags/series?t=markets&et=&pageID=2"
+    ) == "https://fred.stlouisfed.org/tags/series?t=markets&et=&pageID=2"
+
+
+def test_fred_parses_csv_observations() -> None:
+    adapter = FredAdapter()
+    source = FetchResult(
+        url="https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500",
+        body=(
+            b"observation_date,SP500\n"
+            b"2026-08-27,6500.25\n"
+            b"2026-08-28,6512.75\n"
+        ),
+        fetched_at="2026-08-30T00:00:00Z",
+        cached=False,
+        etag=None,
+        last_modified=None,
+        content_type="application/csv",
+        provider="fred",
+    )
+
+    result = adapter.skim(source, selected_sections=None, max_links_per_section=0)
+
+    assert result["title"] == "FRED series SP500"
+    assert result["tables"] == [
+        {
+            "section_id": "observations",
+            "caption": "Latest observations",
+            "headers": ["observation_date", "SP500"],
+            "rows": [["2026-08-27", "6500.25"], ["2026-08-28", "6512.75"]],
+            "truncated": False,
+        }
+    ]
+    assert result["meta"]["media_type"] == "csv"
+
+
+def test_fred_read_wraps_csv_decode_errors() -> None:
+    adapter = FredAdapter()
+    source = FetchResult(
+        url="https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500",
+        body=b"\xff",
+        fetched_at="2026-08-30T00:00:00Z",
+        cached=False,
+        etag=None,
+        last_modified=None,
+        content_type="application/csv",
+        provider="fred",
+    )
+
+    with pytest.raises(WikiAgentError, match="decode FRED CSV"):
+        adapter.read(source, output_format="plain")
 
 
 def test_web_adapter_parses_public_https_and_external_links(monkeypatch) -> None:
