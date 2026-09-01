@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from lxml import etree, html
 
 from ..errors import WikiAgentError
-from .generic import GenericHtmlAdapter, clean_text, element_text
+from .generic import GenericHtmlAdapter, GenericSection, clean_text, element_text
 
 if TYPE_CHECKING:
     from ..fetcher import FetchResult
@@ -26,6 +26,7 @@ SEARCH_QUERY_KEYS = {
 
 class NerdWalletAdapter(GenericHtmlAdapter):
     name = "nerdwallet"
+    protected_domains = frozenset({"nerdwallet.com"})
     hosts = frozenset({"nerdwallet.com", "www.nerdwallet.com"})
     root_xpaths = (
         "//main",
@@ -180,9 +181,78 @@ class NerdWalletAdapter(GenericHtmlAdapter):
             return "listing"
         if path in {"", "/"}:
             return "index"
+        if path.rstrip("/") in {"/finance", "/investing", "/retirement"}:
+            return "index"
+        if "/hubs/" in path:
+            return "index"
         if "/best/" in path:
             return "listing"
         return "article"
+
+    def sections(self, root: etree._Element) -> list[GenericSection]:
+        headings = root.xpath(".//h1|.//h2|.//h3|.//h4|.//h5|.//h6")
+        if not headings:
+            return super().sections(root)
+        sections: list[GenericSection] = []
+        first_boundary = self._heading_boundary(headings[0], root)
+        lead_nodes = list(first_boundary.itersiblings(preceding=True))
+        lead_nodes.reverse()
+        sections.append(GenericSection("lead", "Lead", lead_nodes))
+        for heading in headings:
+            level = int(heading.tag[1])
+            boundary = self._heading_boundary(heading, root)
+            nodes: list[etree._Element] = []
+            for sibling in boundary.itersiblings():
+                next_headings = sibling.xpath(
+                    ".//h1|.//h2|.//h3|.//h4|.//h5|.//h6"
+                )
+                if next_headings and int(next_headings[0].tag[1]) <= level:
+                    break
+                nodes.append(sibling)
+            heading_text = element_text(heading)
+            section_id = (
+                boundary.xpath(".//*[@id][1]/@id")
+                or boundary.xpath("./@id")
+                or [re.sub(r"\W+", "_", heading_text).strip("_")]
+            )[0]
+            sections.append(
+                GenericSection(section_id or "section", heading_text, nodes)
+            )
+        return sections
+
+    def _heading_boundary(
+        self,
+        heading: etree._Element,
+        root: etree._Element,
+    ) -> etree._Element:
+        boundary = heading
+        while boundary.getparent() is not None and boundary.getparent() is not root:
+            parent = boundary.getparent()
+            children = [child for child in parent if isinstance(child.tag, str)]
+            if len(children) != 1:
+                break
+            boundary = parent
+        return boundary
+
+    def visible_text(self, root: etree._Element) -> str:
+        parts: list[str] = []
+        for section in self.sections(root):
+            if section.heading != "Lead":
+                parts.append(section.heading)
+            for node in section.nodes:
+                text = clean_text(
+                    " ".join(
+                        node.xpath(
+                            ".//text()[not(ancestor::script) and "
+                            "not(ancestor::style) and not(ancestor::noscript) "
+                            "and not(ancestor::nav) and not(ancestor::footer) "
+                            "and not(ancestor::form)]"
+                        )
+                    )
+                )
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts)
 
     def metadata(
         self,

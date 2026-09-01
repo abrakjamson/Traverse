@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
 class SiteAdapter(ABC):
     name: str
+    protected_domains: frozenset[str] = frozenset()
+    is_fallback = False
 
     @abstractmethod
     def matches(self, url: str) -> bool:

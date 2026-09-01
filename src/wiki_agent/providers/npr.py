@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class NprAdapter(GenericHtmlAdapter):
     name = "npr"
+    protected_domains = frozenset({"npr.org"})
     hosts = frozenset({"npr.org", "www.npr.org"})
     root_xpaths = (
         "//main",

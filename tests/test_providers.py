@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+from argparse import Namespace
+
 import pytest
 
+from wiki_agent.config import load_config
 from wiki_agent.errors import WikiAgentError
 from wiki_agent.fetcher import FetchResult
 from wiki_agent.providers.arxiv import ArxivAdapter
 from wiki_agent.providers.imdb import ImdbAdapter
+from wiki_agent.providers.ikea import IkeaAdapter
 from wiki_agent.providers.nerdwallet import NerdWalletAdapter
 from wiki_agent.providers.npr import NprAdapter
 from wiki_agent.providers.fred import FredAdapter
+from wiki_agent.providers.foxsports import FoxSportsAdapter
+from wiki_agent.providers.registry import build_registry
+from wiki_agent.providers.stockanalysis import StockAnalysisAdapter
+from wiki_agent.providers.staples import StaplesAdapter
 from wiki_agent.providers.web import WebAdapter
+from wiki_agent.providers.webmd import WebMdAdapter
 
 
 def fetched(url: str, body: bytes, provider: str) -> FetchResult:
@@ -122,6 +131,34 @@ def test_arxiv_abstract_extracts_metadata_and_abstract() -> None:
     ]
 
 
+def test_arxiv_listing_summarizes_definition_lists() -> None:
+    adapter = ArxivAdapter()
+    source = fetched(
+        "https://arxiv.org/list/cs.AI/new",
+        b"""
+        <html><head><title>Artificial Intelligence</title></head><body><main>
+          <h1>Artificial Intelligence</h1>
+          <h3>New submissions</h3>
+          <dl>
+            <dt><a href="/abs/2608.28590">arXiv:2608.28590</a></dt>
+            <dd>DS-Lighting: Making Agent Harnesses Explicit</dd>
+          </dl>
+        </main></body></html>
+        """,
+        "arxiv",
+    )
+
+    result = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+
+    section = next(item for item in result["sections"] if item["heading"] == "New submissions")
+    assert section["summary"] == (
+        "arXiv:2608.28590 DS-Lighting: Making Agent Harnesses Explicit"
+    )
+    assert section["link_sentences"][0]["href"] == (
+        "https://arxiv.org/abs/2608.28590"
+    )
+
+
 def test_nerdwallet_blocks_search_routes_and_queries() -> None:
     adapter = NerdWalletAdapter()
 
@@ -228,6 +265,43 @@ def test_nerdwallet_extracts_wordpress_json_ld_metadata() -> None:
     ]
     assert result["infobox"]["image"] == "https://www.nerdwallet.com/image.jpg"
     assert result["lead"].startswith("This practical budgeting guide")
+
+
+def test_nerdwallet_extracts_wrapped_heading_sections() -> None:
+    adapter = NerdWalletAdapter()
+    source = fetched(
+        "https://www.nerdwallet.com/retirement/learn/social-security-payment-schedule",
+        b"""
+        <html><head><title>Social Security Payment Schedule</title></head>
+        <body><main><article>
+          <div class="mb-4"><div id="september-dates">
+            <h2>What day is my September 2026 payment coming?</h2>
+          </div></div>
+          <div class="mb-4"><span>September 1: SSI payments arrive.</span></div>
+          <div class="mb-4"><span>September 9: Birthdays from 1 to 10.</span></div>
+          <div class="mb-4"><div id="october-dates">
+            <h2>What day is my October 2026 payment coming?</h2>
+          </div></div>
+          <div class="mb-4"><span>October 1: SSI payments arrive.</span></div>
+        </article></main></body></html>
+        """,
+        "nerdwallet",
+    )
+
+    skim = adapter.skim(
+        source,
+        selected_sections=["september-dates"],
+        max_links_per_section=5,
+    )
+    read = adapter.read(source, output_format="plain")
+
+    assert skim["sections"][0]["summary"] == (
+        "September 1: SSI payments arrive."
+    )
+    assert "September 9: Birthdays from 1 to 10." in read["text"]
+    assert adapter.page_type(
+        "https://www.nerdwallet.com/investing/hubs/social-security"
+    ) == "index"
 
 
 def test_nerdwallet_traverses_wordpress_feed() -> None:
@@ -442,6 +516,522 @@ def test_fred_read_wraps_csv_decode_errors() -> None:
 
     with pytest.raises(WikiAgentError, match="decode FRED CSV"):
         adapter.read(source, output_format="plain")
+
+
+def test_stockanalysis_blocks_search_and_account_surfaces() -> None:
+    adapter = StockAnalysisAdapter()
+
+    for url in (
+        "https://stockanalysis.com/search/?q=msft",
+        "https://stockanalysis.com/symbol-lookup/",
+        "https://stockanalysis.com/stocks/screener/",
+        "https://stockanalysis.com/login/",
+        "https://stockanalysis.com/e/example",
+        "https://stockanalysis.com/p/example",
+        "https://stockanalysis.com/stocks/msft/history/?period=year",
+    ):
+        with pytest.raises(WikiAgentError, match="blocked|query"):
+            adapter.validate_url(url)
+
+    assert adapter.validate_url(
+        "https://www.stockanalysis.com/stocks/msft/history/"
+    ) == "https://stockanalysis.com/stocks/msft/history/"
+    assert adapter.validate_url(
+        "https://stockanalysis.com/sitemaps/stocks/stocks2.xml"
+    ) == "https://stockanalysis.com/sitemaps/stocks/stocks2.xml"
+
+
+def test_stockanalysis_traverses_sitemap_for_ticker_history() -> None:
+    adapter = StockAnalysisAdapter()
+    source = FetchResult(
+        url="https://stockanalysis.com/sitemaps/stocks/stocks2.xml",
+        body=b"""<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url><loc>https://stockanalysis.com/stocks/msft/</loc></url>
+          <url><loc>https://stockanalysis.com/stocks/msft/history/</loc></url>
+          <url><loc>https://stockanalysis.com/stocks/nvda/history/</loc></url>
+        </urlset>
+        """,
+        fetched_at="2026-08-30T00:00:00Z",
+        cached=False,
+        etag=None,
+        last_modified=None,
+        content_type="application/xml",
+        provider="stockanalysis",
+    )
+
+    result = adapter.traverse(source, 10, query="msft history")
+
+    assert result["links"] == [
+        {
+            "href": "https://stockanalysis.com/stocks/msft/history/",
+            "text": "stocks msft history",
+            "context": "",
+            "page_type": "listing",
+            "namespace": "stockanalysis",
+        }
+    ]
+    assert result["meta"]["provider"] == "stockanalysis"
+
+
+def test_stockanalysis_extracts_historical_price_table_and_news_links() -> None:
+    adapter = StockAnalysisAdapter()
+    source = fetched(
+        "https://stockanalysis.com/stocks/msft/history/",
+        b"""
+        <html><head><title>Microsoft Stock Price History</title></head><body><main>
+          <h1>Microsoft Stock Price History</h1>
+          <p>Historical price data is provided by S&amp;P Global Market Intelligence.</p>
+          <h2>Historical Data</h2>
+          <table>
+            <thead><tr>
+              <th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>Aug 28, 2026</td><td>505.33</td><td>517.78</td><td>504.87</td><td>513.53</td></tr>
+              <tr><td>Aug 27, 2026</td><td>494.88</td><td>506.48</td><td>490.08</td><td>505.06</td></tr>
+            </tbody>
+          </table>
+          <h2>MSFT News</h2>
+          <p><a href="https://example.com/msft-ai">Microsoft AI roadmap</a></p>
+        </main></body></html>
+        """,
+        "stockanalysis",
+    )
+
+    skim = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+    read = adapter.read(source, output_format="plain")
+    links = adapter.traverse(source, 10, namespaces=["external"])
+
+    assert skim["tables"] == [
+        {
+            "section_id": "Historical_Data",
+            "caption": None,
+            "headers": ["Date", "Open", "High", "Low", "Close"],
+            "rows": [
+                ["Aug 28, 2026", "505.33", "517.78", "504.87", "513.53"],
+                ["Aug 27, 2026", "494.88", "506.48", "490.08", "505.06"],
+            ],
+            "truncated": False,
+        }
+    ]
+    assert read["tables"] == skim["tables"]
+    assert "tables" not in read["skim"]
+    assert links["links"][0]["href"] == "https://example.com/msft-ai"
+    assert links["links"][0]["page_type"] == "external"
+
+
+def test_foxsports_synthesizes_league_subdirectories() -> None:
+    adapter = FoxSportsAdapter()
+    source = fetched(
+        "https://www.foxsports.com/nfl",
+        b"""
+        <html><head><meta property="og:title" content="NFL News and Scores"></head>
+        <body><main><h1>NFL</h1><a href="/stories/nfl/example">Latest story</a></main></body></html>
+        """,
+        "foxsports",
+    )
+
+    result = adapter.traverse(source, 10, page_types=["listing"])
+
+    assert [link["text"] for link in result["links"]] == [
+        "Scores",
+        "Standings",
+        "Schedule",
+        "Teams",
+        "Stats",
+    ]
+    assert result["links"][0]["href"] == "https://www.foxsports.com/nfl/scores"
+
+
+def test_foxsports_validates_display_queries_and_blocks_interactive_routes() -> None:
+    adapter = FoxSportsAdapter()
+
+    assert adapter.validate_url(
+        "https://foxsports.com/nfl/schedule?seasonType=reg&week=2"
+    ) == "https://www.foxsports.com/nfl/schedule?seasonType=reg&week=2"
+    assert adapter.validate_url(
+        "https://www.foxsports.com/sitemap.xml?type=football&page=2"
+    ) == "https://www.foxsports.com/sitemap.xml?type=football&page=2"
+    for url in (
+        "https://www.foxsports.com/search/?q=nfl",
+        "https://www.foxsports.com/live/",
+        "https://www.foxsports.com/betting/nfl",
+        "https://www.foxsports.com/nfl/schedule?q=bills",
+        "https://www.foxsports.com/sitemap.xml?type=unknown",
+    ):
+        with pytest.raises(WikiAgentError, match="blocked|unsupported"):
+            adapter.validate_url(url)
+
+
+def test_foxsports_extracts_schedule_and_standings_tables() -> None:
+    adapter = FoxSportsAdapter()
+    source = fetched(
+        "https://www.foxsports.com/nfl/standings",
+        b"""
+        <html><head><meta property="og:title" content="NFL Standings"></head><body><main>
+          <h1>NFL PRESEASON STANDINGS</h1>
+          <table>
+            <thead><tr><th>Team</th><th>W</th><th>L</th></tr></thead>
+            <tbody><tr><td>Buffalo Bills</td><td>3</td><td>0</td></tr></tbody>
+          </table>
+          <a href="/nfl/buffalo-bills-team">Buffalo Bills</a>
+        </main></body></html>
+        """,
+        "foxsports",
+    )
+
+    skim = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+    read = adapter.read(source, output_format="plain")
+
+    assert skim["title"] == "NFL Standings"
+    assert skim["lead"].startswith("FOX Sports page for NFL Standings")
+    assert skim["tables"][0]["headers"] == ["Team", "W", "L"]
+    assert skim["tables"][0]["rows"] == [["Buffalo Bills", "3", "0"]]
+    assert read["tables"] == skim["tables"]
+    assert "tables" not in read["skim"]
+
+
+def test_reserved_domains_cannot_fall_through_to_generic_web(tmp_path) -> None:
+    config = load_config(
+        Namespace(
+            dev=True,
+            ndjson=False,
+            cache_path=tmp_path / "cache.sqlite3",
+            base_url="https://en.wikipedia.org",
+        )
+    )
+    registry = build_registry(config)
+
+    for url in (
+        "https://www.foxsports.com./nfl/",
+        "https://m.foxsports.com/nfl/",
+        "https://api.foxsports.com/data",
+    ):
+        assert registry.resolve(url).name == "foxsports"
+    assert registry.resolve(
+        "https://www.webmd.com./search/search_results/default.aspx?query=allergy"
+    ).name == "webmd"
+    assert registry.resolve("https://www.imdb.com/title/tt0111161/").name == "imdb"
+    assert registry.resolve("https://www.ikea.com./us/en/search/?q=desk").name == "ikea"
+    assert registry.resolve("https://api.staples.com/products").name == "staples"
+
+
+def test_ikea_allows_us_navigation_and_blocks_interactive_routes() -> None:
+    adapter = IkeaAdapter()
+
+    assert adapter.validate_url(
+        "https://ikea.com/us/en/cat/sofas-sectionals-fu003/"
+    ) == "https://www.ikea.com/us/en/cat/sofas-sectionals-fu003/"
+    assert adapter.page_type(
+        "https://www.ikea.com/us/en/p/glostad-sofa-40595942/"
+    ) == "article"
+    for url in (
+        "https://www.ikea.com/ca/en/cat/sofas-fu003/",
+        "https://www.ikea.com/us/en/search/?q=sofa",
+        "https://www.ikea.com/us/en/cat/sofas-fu003/?filter=color",
+        "https://www.ikea.com/us/en/cart/",
+        "https://www.ikea.com/us/en/checkout/",
+        "https://www.ikea.com/us/en/profile/",
+        "https://example.com/us/en/cat/sofas-fu003/",
+        "https://user@www.ikea.com/us/en/cat/sofas-fu003/",
+        "https://www.ikea.com:8443/us/en/cat/sofas-fu003/",
+    ):
+        with pytest.raises(
+            WikiAgentError,
+            match="blocked|query|not supported|credentials or a port",
+        ):
+            adapter.validate_url(url)
+
+
+def test_ikea_traverses_categories_and_extracts_product_metadata() -> None:
+    adapter = IkeaAdapter()
+    source = fetched(
+        "https://www.ikea.com/us/en/cat/sofas-sectionals-fu003/",
+        b"""
+        <html><head><meta property="og:title" content="Sofas &amp; Sectionals"></head>
+        <body><main id="main-content">
+          <h1>Sofas &amp; Sectionals</h1>
+          <p>Find a comfortable sofa that fits your room, budget, and everyday needs.</p>
+          <a href="/us/en/cat/two-seat-sofas-10668/">Two-seat sofas</a>
+          <a href="/us/en/p/glostad-sofa-knisa-dark-gray-40595942/?utm_source=test">GLOSTAD sofa $169</a>
+          <a href="/us/en/search/?q=sofa">Search</a>
+          <a href="https://example.com/ad">Advertisement</a>
+        </main></body></html>
+        """,
+        "ikea",
+    )
+
+    result = adapter.traverse(source, 10)
+
+    assert [link["href"] for link in result["links"]] == [
+        "https://www.ikea.com/us/en/cat/two-seat-sofas-10668/",
+        "https://www.ikea.com/us/en/p/glostad-sofa-knisa-dark-gray-40595942/",
+    ]
+    assert [link["page_type"] for link in result["links"]] == ["listing", "article"]
+
+    product = fetched(
+        "https://www.ikea.com/us/en/p/glostad-sofa-knisa-dark-gray-40595942/",
+        b"""
+        <html><head>
+          <meta property="og:title" content="GLOSTAD sofa">
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "brand": {"name": "IKEA"},
+            "sku": "40595942",
+            "image": ["https://www.ikea.com/glostad.jpg"],
+            "offers": {
+              "price": "169.00",
+              "priceCurrency": "USD",
+              "availability": "https://schema.org/InStock"
+            }
+          }
+          </script>
+        </head><body><main><h1>GLOSTAD sofa</h1>
+          <p>A compact and comfortable dark gray sofa for everyday use.</p>
+        </main></body></html>
+        """,
+        "ikea",
+    )
+    skim = adapter.skim(product, selected_sections=None, max_links_per_section=5)
+
+    assert skim["infobox"] == {
+        "image": "https://www.ikea.com/glostad.jpg",
+        "fields": [
+            {"key": "Brand", "value": "IKEA"},
+            {"key": "SKU", "value": "40595942"},
+            {"key": "Price", "value": "169.00"},
+            {"key": "Currency", "value": "USD"},
+            {"key": "Availability", "value": "InStock"},
+        ],
+    }
+
+
+def test_staples_restricts_navigation_to_categories_and_products() -> None:
+    adapter = StaplesAdapter()
+
+    assert adapter.validate_url(
+        "https://staples.com/Office-Supplies/cat_SC1"
+    ) == "https://www.staples.com/Office-Supplies/cat_SC1"
+    assert adapter.page_type(
+        "https://www.staples.com/Office-Supplies/cat_SC1"
+    ) == "index"
+    assert adapter.page_type(
+        "https://www.staples.com/Pens/cat_CL110001"
+    ) == "listing"
+    for url in (
+        "https://www.staples.com/search?q=pens",
+        "https://www.staples.com/Pens/cat_CL110001?page=2",
+        "https://www.staples.com/cart",
+        "https://www.staples.com/api/products",
+        "https://www.staples.com/sbd/content/help/policies/terms_popup.html",
+        "https://example.com/Pens/cat_CL110001",
+        "https://user@www.staples.com/Pens/cat_CL110001",
+        "https://www.staples.com:8443/Pens/cat_CL110001",
+    ):
+        with pytest.raises(
+            WikiAgentError,
+            match="blocked|query|not supported|credentials or a port",
+        ):
+            adapter.validate_url(url)
+
+
+def test_staples_traverses_department_category_and_product_links() -> None:
+    adapter = StaplesAdapter()
+    source = fetched(
+        "https://www.staples.com/Pens/cat_CL110001",
+        b"""
+        <html><head><meta property="og:title" content="Pens"></head><body><main>
+          <h1>Pens</h1>
+          <p>Shop pens for school, home, and office writing tasks.</p>
+          <a href="/Writing-Supplies/cat_CL140899">Writing supplies</a>
+          <div>
+            <a href="/bic-round-stic-black-60-pack/product_442901?cid=promo">
+              BIC Round Stic Xtra-Life Ballpoint Pen
+            </a>
+            Price is $6.99, regular price was $8.69.
+          </div>
+          <a href="/search?q=gel">Search</a>
+          <a href="https://example.com/ad">Advertisement</a>
+        </main></body></html>
+        """,
+        "staples",
+    )
+
+    result = adapter.traverse(source, 10)
+
+    assert [link["href"] for link in result["links"]] == [
+        "https://www.staples.com/Writing-Supplies/cat_CL140899",
+        "https://www.staples.com/bic-round-stic-black-60-pack/product_442901",
+    ]
+    assert result["links"][1]["page_type"] == "article"
+    assert "$6.99" in result["links"][1]["context"]
+
+
+def test_staples_traverses_products_embedded_in_listing_json() -> None:
+    adapter = StaplesAdapter()
+    source = fetched(
+        "https://www.staples.com/Smart-Watches/cat_CL211894",
+        b"""
+        <html><head><meta property="og:title" content="Smart Watches"></head>
+        <body><main><h1>Smart Watches</h1>
+          <a href="/Garmin-Smart-Watches/cat_CL211894/0060l">Garmin</a>
+        </main>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "products": [{
+              "itemId": "24678700",
+              "url": "/garmin-fenix-8-pro/product_24678700",
+              "title": "Garmin Fenix 8 Pro Multisport Smart Watch",
+              "price": "$1,254.59",
+              "pricePerUnit": "",
+              "rating": 4.35,
+              "ratingCount": 17
+            }]
+          }
+        }
+        </script></body></html>
+        """,
+        "staples",
+    )
+
+    result = adapter.traverse(source, 10, query="fenix")
+
+    assert result["links"] == [
+        {
+            "href": "https://www.staples.com/garmin-fenix-8-pro/product_24678700",
+            "text": "Garmin Fenix 8 Pro Multisport Smart Watch",
+            "context": "$1,254.59 | 4.35 stars from 17 ratings",
+            "page_type": "article",
+            "namespace": "staples",
+        }
+    ]
+
+
+def test_webmd_allows_only_topic_index_letter_queries() -> None:
+    adapter = WebMdAdapter()
+
+    assert adapter.validate_url(
+        "https://webmd.com/a-to-z-guides/health-topics?pg=B"
+    ) == "https://www.webmd.com/a-to-z-guides/health-topics?pg=b"
+    assert adapter.validate_url(
+        "https://www.webmd.com/allergies/default.htm"
+    ) == "https://www.webmd.com/allergies/default.htm"
+    for url in (
+        "https://www.webmd.com/a-to-z-guides/health-topics?pg=all",
+        "https://www.webmd.com/a-to-z-guides/health-topics?q=allergy",
+        "https://www.webmd.com/allergies/default.htm?page=2",
+        "https://www.webmd.com/search/search_results/default.aspx?query=allergy",
+        "https://www.webmd.com/api/topics",
+        "https://user:secret@www.webmd.com/allergies/default.htm",
+        "https://www.webmd.com:8443/allergies/default.htm",
+    ):
+        with pytest.raises(
+            WikiAgentError,
+            match="blocked|single letter|pg parameter|credentials or a port",
+        ):
+            adapter.validate_url(url)
+
+
+def test_webmd_topic_index_synthesizes_letters_and_filters_topics() -> None:
+    adapter = WebMdAdapter()
+    source = fetched(
+        "https://www.webmd.com/a-to-z-guides/health-topics?pg=a",
+        b"""
+        <html><head><meta property="og:title" content="Health A-Z"></head><body><main>
+          <h1>Health A-Z</h1>
+          <h2>Topics Starting With A</h2>
+          <a href="/allergies/default.htm">Allergies</a>
+          <a href="/allergies/insect-stings">Allergies to Insect Stings</a>
+          <a href="https://example.com/ad">External advertisement</a>
+        </main></body></html>
+        """,
+        "webmd",
+    )
+
+    directory = adapter.traverse(source, 30, page_types=["listing"])
+    allergies = adapter.traverse(source, 10, query="allerg")
+
+    assert [link["text"] for link in directory["links"][:3]] == ["A", "B", "C"]
+    assert directory["links"][1]["href"].endswith("?pg=b")
+    assert [link["href"] for link in allergies["links"]] == [
+        "https://www.webmd.com/allergies/default.htm",
+        "https://www.webmd.com/allergies/insect-stings",
+    ]
+    assert all(link["namespace"] == "webmd" for link in allergies["links"])
+
+
+def test_webmd_strips_tracking_queries_from_discovered_links() -> None:
+    adapter = WebMdAdapter()
+    source = fetched(
+        "https://www.webmd.com/allergies/default.htm",
+        b"""
+        <html><body><main>
+          <h1>Allergies</h1>
+          <a href="/allergies/anaphylaxis?ecd=wnl_day">Anaphylaxis</a>
+        </main></body></html>
+        """,
+        "webmd",
+    )
+
+    result = adapter.traverse(source, 10)
+
+    assert result["links"][0]["href"] == "https://www.webmd.com/allergies/anaphylaxis"
+
+
+def test_webmd_extracts_article_metadata_lead_tables_and_internal_links() -> None:
+    adapter = WebMdAdapter()
+    source = fetched(
+        "https://www.webmd.com/allergies/example",
+        b"""
+        <html><head>
+          <meta property="og:title" content="Understanding Allergies">
+          <script type="application/ld+json">
+          {
+            "@type": "MedicalWebPage",
+            "author": {"name": "WebMD Editorial Contributor"},
+            "reviewedBy": {"name": "Ada Physician, MD"},
+            "dateModified": "2026-08-30",
+            "image": {"url": "https://img.webmd.com/allergies.jpg"}
+          }
+          </script>
+        </head><body><main id="main-content">
+          <h1>Find Doctors and Dentists Near You</h1>
+          <h1>Understanding Allergies</h1>
+          <p>Medically reviewed by Ada Physician, MD.</p>
+          <p>Allergies happen when the immune system reacts to a normally harmless substance and can cause symptoms ranging from mild irritation to a serious emergency.</p>
+          <h2>Symptoms</h2>
+          <p>Symptoms vary by trigger and exposure.</p>
+          <table><tr><th>Trigger</th><th>Example</th></tr><tr><td>Pollen</td><td>Grass</td></tr></table>
+          <p><a href="/allergies/insect-stings">Insect sting allergies</a></p>
+          <p><a href="https://example.com/ad">Advertisement</a></p>
+        </main></body></html>
+        """,
+        "webmd",
+    )
+
+    skim = adapter.skim(source, selected_sections=None, max_links_per_section=5)
+    read = adapter.read(source, output_format="plain")
+    links = adapter.traverse(source, 10)
+
+    assert skim["title"] == "Understanding Allergies"
+    assert skim["lead"].startswith("Allergies happen when")
+    assert skim["infobox"] == {
+        "image": "https://img.webmd.com/allergies.jpg",
+        "fields": [
+            {"key": "Author", "value": "WebMD Editorial Contributor"},
+            {"key": "Reviewed by", "value": "Ada Physician, MD"},
+            {"key": "Updated", "value": "2026-08-30"},
+        ],
+    }
+    assert skim["tables"][0]["headers"] == ["Trigger", "Example"]
+    assert read["tables"] == skim["tables"]
+    assert "tables" not in read["skim"]
+    assert [link["href"] for link in links["links"]] == [
+        "https://www.webmd.com/allergies/insect-stings"
+    ]
 
 
 def test_web_adapter_parses_public_https_and_external_links(monkeypatch) -> None:

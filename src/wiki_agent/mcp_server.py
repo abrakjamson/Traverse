@@ -8,6 +8,7 @@ from .cache import Cache
 from .config import Config
 from .errors import WikiAgentError
 from .fetcher import PoliteFetcher
+from .help_content import build_help
 from .providers import build_registry
 
 
@@ -17,6 +18,7 @@ def create_mcp_server(config: Config) -> FastMCP:
         instructions=(
             "Browse supported knowledge sites politely. Use traverse for link discovery, "
             "skim for section-level understanding, and read for full page content. "
+            "Call help for detailed workflows, supported sites, and traversal examples. "
             "Search endpoints are intentionally blocked."
         ),
     )
@@ -27,6 +29,11 @@ def create_mcp_server(config: Config) -> FastMCP:
 
     def tool_error(exc: WikiAgentError) -> ValueError:
         return ValueError(f"{exc.code}: {exc.message}")
+
+    @mcp.tool()
+    def help() -> dict[str, Any]:
+        """Describe PurePath tools, supported sites, restrictions, and traversal workflows."""
+        return build_help()
 
     @mcp.tool()
     def traverse(

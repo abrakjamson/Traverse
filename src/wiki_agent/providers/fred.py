@@ -21,6 +21,7 @@ MAX_CSV_COLUMNS = 100
 
 class FredAdapter(GenericHtmlAdapter):
     name = "fred"
+    protected_domains = frozenset({"fred.stlouisfed.org"})
     hosts = frozenset({"fred.stlouisfed.org"})
     root_xpaths = (
         "//*[@id='content-container']",

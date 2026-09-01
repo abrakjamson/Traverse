@@ -7,6 +7,7 @@ from .generic import GenericHtmlAdapter
 
 class ImdbAdapter(GenericHtmlAdapter):
     name = "imdb"
+    protected_domains = frozenset({"imdb.com"})
     hosts = frozenset({"help.imdb.com"})
     root_xpaths = (
         "//*[@id='article_content']",

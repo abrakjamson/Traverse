@@ -21,6 +21,7 @@ MAX_PDF_TEXT_CHARS = 5_000_000
 
 class WebAdapter(GenericHtmlAdapter):
     name = "web"
+    is_fallback = True
     root_xpaths = ("//main", "//*[@role='main']", "//*[@id='content']", "//article", "//body")
 
     def matches(self, url: str) -> bool:

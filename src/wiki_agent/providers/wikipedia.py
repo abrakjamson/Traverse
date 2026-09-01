@@ -18,6 +18,7 @@ class WikipediaAdapter(SiteAdapter):
     def __init__(self, base_url: str = "https://en.wikipedia.org"):
         self.base_url = base_url.rstrip("/")
         self._origin = urllib.parse.urlsplit(self.base_url)
+        self.protected_domains = frozenset({self._origin.hostname or ""})
 
     def matches(self, url: str) -> bool:
         parsed = urllib.parse.urlsplit(url)

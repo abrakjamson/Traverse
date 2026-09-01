@@ -10,6 +10,7 @@ from .generic import GenericHtmlAdapter, element_text
 
 class ArxivAdapter(GenericHtmlAdapter):
     name = "arxiv"
+    protected_domains = frozenset({"arxiv.org"})
     hosts = frozenset({"arxiv.org"})
     root_xpaths = ("//main", "//*[@id='content']", "//body")
     allowed_path_prefixes = (

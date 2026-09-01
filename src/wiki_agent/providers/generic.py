@@ -133,7 +133,8 @@ class GenericHtmlAdapter(SiteAdapter):
     allowed_query_keys: frozenset[str] = frozenset()
 
     def matches(self, url: str) -> bool:
-        return urllib.parse.urlsplit(url).hostname in self.hosts
+        hostname = (urllib.parse.urlsplit(url).hostname or "").rstrip(".").casefold()
+        return hostname in self.hosts
 
     def path_allowed(self, path: str) -> bool:
         def matches(prefix: str) -> bool:
@@ -148,7 +149,8 @@ class GenericHtmlAdapter(SiteAdapter):
         if not isinstance(value, str) or not value:
             raise WikiAgentError("invalid_request", "url must be a non-empty string")
         parsed = urllib.parse.urlsplit(value)
-        if parsed.scheme != "https" or parsed.hostname not in self.hosts:
+        hostname = (parsed.hostname or "").rstrip(".").casefold()
+        if parsed.scheme != "https" or hostname not in self.hosts:
             raise WikiAgentError("invalid_request", f"url is not supported by the {self.name} adapter")
         if parsed.username or parsed.password or parsed.port:
             raise WikiAgentError("invalid_request", "url must not contain credentials or a port")
@@ -162,7 +164,7 @@ class GenericHtmlAdapter(SiteAdapter):
             query_pairs = []
         path = urllib.parse.quote(decoded_path, safe="/:@()_,-.")
         query = urllib.parse.urlencode(query_pairs)
-        return urllib.parse.urlunsplit(("https", parsed.hostname, path, query, ""))
+        return urllib.parse.urlunsplit(("https", hostname, path, query, ""))
 
     def robots_url(self, url: str) -> str:
         parsed = urllib.parse.urlsplit(url)
@@ -280,7 +282,10 @@ class GenericHtmlAdapter(SiteAdapter):
 
     def visible_text(self, root: etree._Element) -> str:
         parts: list[str] = []
-        for node in root.xpath(".//h1|.//h2|.//h3|.//h4|.//h5|.//h6|.//p|.//li|.//blockquote"):
+        for node in root.xpath(
+            ".//h1|.//h2|.//h3|.//h4|.//h5|.//h6|.//p|.//li|"
+            ".//dt|.//dd|.//blockquote"
+        ):
             if any(ancestor.tag in {"script", "style", "noscript", "nav", "footer", "form"} for ancestor in node.iterancestors()):
                 continue
             text = element_text(node)
@@ -406,7 +411,8 @@ class GenericHtmlAdapter(SiteAdapter):
             text = "\n\n".join(
                 value
                 for node in section.nodes
-                if isinstance(node.tag, str) and node.tag in {"p", "li", "div", "blockquote"}
+                if isinstance(node.tag, str)
+                and node.tag in {"p", "li", "dl", "dt", "dd", "div", "blockquote"}
                 if (value := element_text(node))
             )
             sections.append(
