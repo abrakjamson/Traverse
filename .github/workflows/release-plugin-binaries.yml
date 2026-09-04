@@ -58,8 +58,8 @@ jobs:
             --workdir /workspace \
             python:3.12-slim-bullseye \
             bash -c '
-              /opt/python/cp312-cp312/bin/python -m pip install . pyinstaller &&
-              /opt/python/cp312-cp312/bin/python -m PyInstaller \
+              python -m pip install . pyinstaller &&
+              python -m PyInstaller \
                 --clean \
                 --noconfirm \
                 --onefile \
