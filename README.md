@@ -7,12 +7,15 @@ It requires Node.js and Python 3.11 or newer. The first server launch creates an
 isolated Python environment in the plugin's persistent data directory.
 
 ```powershell
-copilot plugin install abrakjamson/PurePath
+copilot plugin marketplace add abrakjamson/PurePath
+copilot plugin install purepath@purepath-plugins
 copilot --agent purepath:purepath-researcher
 ```
 
 The agent calls only PurePath tools and must be selected explicitly. Use
-`copilot plugin update purepath` to update the plugin.
+`copilot plugin update purepath` to update the plugin. Direct repository
+installation with `copilot plugin install abrakjamson/PurePath` also works in
+current CLI releases.
 
 ## Install the MCP server without the plugin
 
