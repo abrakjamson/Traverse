@@ -82,6 +82,7 @@ if (!process.env.PUREPATH_PLUGIN_EXECUTABLE) {
     );
   }
 }
+
 const pluginData =
   process.env.COPILOT_PLUGIN_DATA ??
   process.env.PUREPATH_PLUGIN_DATA ??

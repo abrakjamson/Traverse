@@ -3,9 +3,10 @@
 ## Install as a GitHub Copilot CLI plugin
 
 The plugin bundles the PurePath server and a tool-restricted research agent.
-It does not require Python or a first-launch dependency installation. The
-plugin includes standalone executables for Windows x64, Linux x64, macOS x64,
-and macOS arm64, and verifies the selected executable's SHA-256 digest before
+It does not require Python or a first-launch dependency installation. It
+requires Node.js 18 or newer for the small cross-platform launcher. The plugin
+includes standalone executables for Windows x64, Linux x64, macOS x64, and
+macOS arm64, and verifies the selected executable's SHA-256 digest before
 launch.
 
 ```powershell
