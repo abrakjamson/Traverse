@@ -3,7 +3,7 @@ name: PurePath Researcher
 description: Research public web sources by following auditable link paths without web search, guessed URLs, or private APIs.
 tools:
   - PurePathPlugin/*
-disable-model-invocation: true
+disable-model-invocation: false
 user-invocable: true
 ---
 
