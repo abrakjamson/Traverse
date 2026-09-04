@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "PurePathPlugin": {
+      "type": "local",
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/run-purepath.mjs"
+      ],
+      "tools": [
+        "*"
+      ],
+      "timeout": 120000
+    }
+  }
+}

@@ -1,6 +1,22 @@
 # PurePath installation
 
-## Install
+## Install as a GitHub Copilot CLI plugin
+
+The plugin bundles the PurePath server and a tool-restricted research agent.
+It requires Node.js and Python 3.11 or newer. The first server launch creates an
+isolated Python environment in the plugin's persistent data directory.
+
+```powershell
+copilot plugin install abrakjamson/PurePath
+copilot --agent purepath:purepath-researcher
+```
+
+The agent calls only PurePath tools and must be selected explicitly. Use
+`copilot plugin update purepath` to update the plugin.
+
+## Install the MCP server without the plugin
+
+### Install the editable package
 
 ```powershell
 gh repo clone abrakjamson/PurePath
