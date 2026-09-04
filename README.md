@@ -3,9 +3,10 @@
 ## Install as a GitHub Copilot CLI plugin
 
 The plugin bundles the PurePath server and a tool-restricted research agent.
-It does not require Python. On first launch, it downloads the release checksum
-and the standalone PurePath executable for the current platform,
-verifies the SHA-256 digest, and caches the executable for later offline use.
+It does not require Python or a first-launch dependency installation. The
+plugin includes standalone executables for Windows x64, Linux x64, macOS x64,
+and macOS arm64, and verifies the selected executable's SHA-256 digest before
+launch.
 
 ```powershell
 copilot plugin marketplace add abrakjamson/PurePath
