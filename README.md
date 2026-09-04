@@ -3,8 +3,9 @@
 ## Install as a GitHub Copilot CLI plugin
 
 The plugin bundles the PurePath server and a tool-restricted research agent.
-It requires Node.js and Python 3.11 or newer. The first server launch creates an
-isolated Python environment in the plugin's persistent data directory.
+It does not require Python. On first launch, it downloads the release checksum
+and the standalone PurePath executable for the current platform,
+verifies the SHA-256 digest, and caches the executable for later offline use.
 
 ```powershell
 copilot plugin marketplace add abrakjamson/PurePath
@@ -30,7 +31,7 @@ python -m pip install -e .
 Set a descriptive user agent with a monitored contact URL:
 
 ```powershell
-$env:PUREPATH_USER_AGENT = "PurePath/0.1 (+https://github.com/abrakjamson)"
+$env:PUREPATH_USER_AGENT = "PurePath/0.2 (+https://github.com/abrakjamson)"
 ```
 
 ## Add to GitHub Copilot CLI
@@ -38,7 +39,7 @@ $env:PUREPATH_USER_AGENT = "PurePath/0.1 (+https://github.com/abrakjamson)"
 ```powershell
 copilot mcp add --transport stdio `
   --env "PUREPATH_CACHE_PATH=$HOME\.copilot\purepath-cache.sqlite3" `
-  --env "PUREPATH_USER_AGENT=PurePath/0.1 (+https://github.com/abrakjamson)" `
+  --env "PUREPATH_USER_AGENT=PurePath/0.2 (+https://github.com/abrakjamson)" `
   PurePath -- purepath
 ```
 

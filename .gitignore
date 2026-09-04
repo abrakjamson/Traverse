@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .purepath-cache.sqlite3
 .wiki-agent-cache.sqlite3
+build/
+dist/
+*.spec

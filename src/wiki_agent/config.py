@@ -59,7 +59,7 @@ def load_config(args: argparse.Namespace) -> Config:
             "PUREPATH_USER_AGENT",
             os.getenv(
                 "WIKI_AGENT_USER_AGENT",
-                "PurePath/0.1 (+https://github.com/abrakjamson/PurePath)",
+                "PurePath/0.2 (+https://github.com/abrakjamson/PurePath)",
             ),
         ),
         crawl_delay_seconds=float(
