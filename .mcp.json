@@ -2,10 +2,8 @@
   "mcpServers": {
     "PurePathPlugin": {
       "type": "local",
-      "command": "node",
-      "args": [
-        "${PLUGIN_ROOT}/scripts/run-purepath.mjs"
-      ],
+      "command": "purepath",
+      "args": [],
       "tools": [
         "*"
       ],

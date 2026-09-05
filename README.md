@@ -1,13 +1,61 @@
 # PurePath installation
 
-## Install as a GitHub Copilot CLI plugin
+## 1. Install the `purepath` command
 
-The plugin bundles the PurePath server and a tool-restricted research agent.
-It does not require Python or a first-launch dependency installation. It
-requires Node.js 18 or newer for the small cross-platform launcher. The plugin
-includes standalone executables for Windows x64, Linux x64, macOS x64, and
-macOS arm64, and verifies the selected executable's SHA-256 digest before
-launch.
+Choose either the Python package or a standalone binary. The Copilot plugin
+uses the `purepath` command from `PATH`.
+
+### Python 3.11 or newer
+
+Install with `pipx` so PurePath has an isolated environment:
+
+```powershell
+gh repo clone abrakjamson/PurePath
+Set-Location PurePath
+pipx install .
+purepath --help
+```
+
+### Standalone binary on Windows x64
+
+This path does not require Python or npm. The installer uses GitHub CLI to
+download the latest release, verify its SHA-256 checksum, install
+`purepath.exe` under the current user profile, and add that directory to the
+user `PATH`.
+
+```powershell
+gh repo clone abrakjamson/PurePath
+Set-Location PurePath
+.\scripts\install-purepath.ps1
+```
+
+Open a new terminal, then verify:
+
+```powershell
+purepath --help
+```
+
+### Standalone binary on Linux or macOS
+
+This path does not require Python or npm. It supports Linux x64, macOS x64,
+and macOS arm64.
+
+```bash
+gh repo clone abrakjamson/PurePath
+cd PurePath
+./scripts/install-purepath.sh
+```
+
+If `~/.local/bin` is not already on `PATH`, add it before continuing:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+purepath --help
+```
+
+## 2. Install the GitHub Copilot CLI plugin
+
+After `purepath --help` succeeds:
 
 ```powershell
 copilot plugin marketplace add abrakjamson/PurePath
@@ -15,28 +63,17 @@ copilot plugin install purepath@purepath-plugins
 copilot --agent purepath:purepath-researcher
 ```
 
-The agent calls only PurePath tools and must be selected explicitly. Use
-`copilot plugin update purepath` to update the plugin. Direct repository
-installation with `copilot plugin install abrakjamson/PurePath` also works in
-current CLI releases.
-
-## Install the MCP server without the plugin
-
-### Install the editable package
+The plugin contains the PurePath-only research agent and MCP configuration; it
+does not install or bundle the server runtime. Update it with:
 
 ```powershell
-gh repo clone abrakjamson/PurePath
-Set-Location PurePath
-python -m pip install -e .
+copilot plugin update purepath
 ```
 
-Set a descriptive user agent with a monitored contact URL:
+## Install only the MCP server integration
 
-```powershell
-$env:PUREPATH_USER_AGENT = "PurePath/0.2 (+https://github.com/abrakjamson)"
-```
-
-## Add to GitHub Copilot CLI
+If you do not want the custom agent, install `purepath` using either method
+above and add it directly:
 
 ```powershell
 copilot mcp add --transport stdio `
@@ -45,16 +82,14 @@ copilot mcp add --transport stdio `
   PurePath -- purepath
 ```
 
-Restart an already-running Copilot CLI session after adding or changing the
-server:
+Restart an already-running Copilot CLI session after changing the server:
 
 ```text
 /restart
 ```
 
-## Verify
+Verify the integration:
 
 ```powershell
 copilot mcp get PurePath
-purepath --help
 ```

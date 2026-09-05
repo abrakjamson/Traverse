@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,16 @@ class Config:
     base_url: str
 
 
+def default_cache_path() -> Path:
+    if os.name == "nt":
+        root = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return root / "PurePath" / "cache.sqlite3"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "PurePath" / "cache.sqlite3"
+    root = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return root / "purepath" / "cache.sqlite3"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the PurePath MCP server.")
     parser.add_argument("--dev", action="store_true", help="Allow development-only cache overrides.")
@@ -36,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(
             os.getenv(
                 "PUREPATH_CACHE_PATH",
-                os.getenv("WIKI_AGENT_CACHE_PATH", ".purepath-cache.sqlite3"),
+                os.getenv("WIKI_AGENT_CACHE_PATH", str(default_cache_path())),
             )
         ),
     )

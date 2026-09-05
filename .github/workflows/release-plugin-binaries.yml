@@ -85,6 +85,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download executables
         uses: actions/download-artifact@v4
         with:
@@ -94,6 +96,9 @@ jobs:
       - name: Create checksum manifest
         working-directory: release
         run: sha256sum purepath-* > SHA256SUMS
+
+      - name: Add installer scripts
+        run: cp scripts/install-purepath.ps1 scripts/install-purepath.sh release/
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
