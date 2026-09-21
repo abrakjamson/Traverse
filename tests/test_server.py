@@ -9,7 +9,7 @@ from wiki_agent.server import StdioServer
 
 
 def test_hello_health_and_goodbye(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("WIKI_AGENT_API_KEY", "secret")
+    monkeypatch.setenv("TRAVERSE_API_KEY", "secret")
     config = load_config(
         Namespace(dev=True, cache_path=tmp_path / "cache.sqlite3", base_url="https://en.wikipedia.org")
     )
@@ -36,7 +36,7 @@ def test_hello_health_and_goodbye(monkeypatch, tmp_path) -> None:
 
 
 def test_rejects_unauthorized_hello(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("WIKI_AGENT_API_KEY", "secret")
+    monkeypatch.setenv("TRAVERSE_API_KEY", "secret")
     config = load_config(
         Namespace(dev=True, cache_path=tmp_path / "cache.sqlite3", base_url="https://en.wikipedia.org")
     )

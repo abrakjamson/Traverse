@@ -16,8 +16,6 @@ pipx install .
 traverse --help
 ```
 
-The previous `purepath` command remains as a compatibility alias.
-
 ### Standalone binary on Windows x64
 
 This path does not require Python or npm. The installer uses GitHub CLI to
@@ -80,7 +78,7 @@ above and add it directly:
 ```powershell
 copilot mcp add --transport stdio `
   --env "TRAVERSE_CACHE_PATH=$HOME\.copilot\traverse-cache.sqlite3" `
-  --env "TRAVERSE_USER_AGENT=Traverse/0.4 (+https://github.com/abrakjamson)" `
+  --env "TRAVERSE_USER_AGENT=Traverse/0.5 (+https://github.com/abrakjamson)" `
   Traverse -- traverse
 ```
 

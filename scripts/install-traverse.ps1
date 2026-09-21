@@ -65,9 +65,6 @@ try {
     Copy-Item -LiteralPath $Download -Destination (
         Join-Path $InstallDirectory "traverse.exe"
     ) -Force
-    Copy-Item -LiteralPath $Download -Destination (
-        Join-Path $InstallDirectory "purepath.exe"
-    ) -Force
 
     if (-not $SkipPathUpdate) {
         $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -82,7 +79,6 @@ try {
     }
 
     Write-Output "Installed Traverse to $InstallDirectory\traverse.exe"
-    Write-Output "Installed compatibility alias at $InstallDirectory\purepath.exe"
     Write-Output "Open a new terminal before installing or running the Copilot plugin."
 }
 finally {

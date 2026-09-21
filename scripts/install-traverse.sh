@@ -3,7 +3,7 @@ set -eu
 
 repository=abrakjamson/Traverse
 version=${1:-}
-install_directory=${TRAVERSE_INSTALL_DIR:-${PUREPATH_INSTALL_DIR:-"$HOME/.local/bin"}}
+install_directory=${TRAVERSE_INSTALL_DIR:-"$HOME/.local/bin"}
 platform=$(uname -s)
 architecture=$(uname -m)
 
@@ -71,9 +71,7 @@ fi
 
 mkdir -p "$install_directory"
 install -m 755 "$temporary_directory/$asset" "$install_directory/traverse"
-ln -sf traverse "$install_directory/purepath"
 echo "Installed Traverse to $install_directory/traverse"
-echo "Installed compatibility alias at $install_directory/purepath"
 
 case ":$PATH:" in
   *":$install_directory:"*) ;;

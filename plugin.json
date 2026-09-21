@@ -1,7 +1,7 @@
 {
   "name": "traverse",
   "description": "Search-free, provenance-preserving research through polite navigation of public hypertext.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": {
     "name": "abrakjamson"
   },
