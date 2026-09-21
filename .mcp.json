@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "PurePathPlugin": {
+    "TraversePlugin": {
       "type": "local",
-      "command": "purepath",
+      "command": "traverse",
       "args": [],
       "tools": [
         "*"

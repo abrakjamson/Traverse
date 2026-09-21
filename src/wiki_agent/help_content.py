@@ -5,10 +5,10 @@ from typing import Any
 
 def build_help() -> dict[str, Any]:
     return {
-        "server": "PurePath",
+        "server": "Traverse",
         "purpose": (
             "Polite, search-free browsing across structured knowledge, news, finance, "
-            "and public HTTPS pages. PurePath follows links from known starting points, "
+            "and public HTTPS pages. Traverse follows links from known starting points, "
             "checks robots.txt, applies crawl delays, and rejects unsafe destinations."
         ),
         "recommended_workflow": [
@@ -478,7 +478,7 @@ def build_help() -> dict[str, Any]:
             },
         ],
         "operating_rules": [
-            "Start from a known URL or a link returned by traverse; PurePath intentionally has no search tool.",
+            "Start from a known URL or a link returned by traverse; Traverse intentionally has no search tool.",
             "Prefer traverse, then skim, then read to minimize bandwidth and unnecessary requests.",
             "A traverse query filters the fetched page locally and never authorizes a blocked search route.",
             "Use returned canonical href values rather than constructing provider URLs when possible.",

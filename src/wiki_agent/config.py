@@ -26,15 +26,19 @@ class Config:
 def default_cache_path() -> Path:
     if os.name == "nt":
         root = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        return root / "PurePath" / "cache.sqlite3"
+        return root / "Traverse" / "cache.sqlite3"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "PurePath" / "cache.sqlite3"
+        return Path.home() / "Library" / "Caches" / "Traverse" / "cache.sqlite3"
     root = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return root / "purepath" / "cache.sqlite3"
+    return root / "traverse" / "cache.sqlite3"
+
+
+def env_value(primary: str, legacy: str, oldest: str, default: str | None = None) -> str | None:
+    return os.getenv(primary, os.getenv(legacy, os.getenv(oldest, default)))
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the PurePath MCP server.")
+    parser = argparse.ArgumentParser(description="Run the Traverse MCP server.")
     parser.add_argument("--dev", action="store_true", help="Allow development-only cache overrides.")
     parser.add_argument(
         "--ndjson",
@@ -45,15 +49,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--cache-path",
         type=Path,
         default=Path(
-            os.getenv(
+            env_value(
+                "TRAVERSE_CACHE_PATH",
                 "PUREPATH_CACHE_PATH",
-                os.getenv("WIKI_AGENT_CACHE_PATH", str(default_cache_path())),
+                "WIKI_AGENT_CACHE_PATH",
+                str(default_cache_path()),
             )
         ),
     )
     parser.add_argument(
         "--base-url",
-        default=os.getenv("PUREPATH_BASE_URL", os.getenv("WIKI_AGENT_BASE_URL", "https://en.wikipedia.org")),
+        default=env_value(
+            "TRAVERSE_BASE_URL",
+            "PUREPATH_BASE_URL",
+            "WIKI_AGENT_BASE_URL",
+            "https://en.wikipedia.org",
+        ),
         help="Development mirror origin; non-Wikipedia origins require --dev.",
     )
     return parser
@@ -65,32 +76,70 @@ def load_config(args: argparse.Namespace) -> Config:
         raise SystemExit("A non-Wikipedia --base-url is only allowed with --dev.")
 
     return Config(
-        api_key=os.getenv("PUREPATH_API_KEY", os.getenv("WIKI_AGENT_API_KEY")),
-        user_agent=os.getenv(
+        api_key=env_value("TRAVERSE_API_KEY", "PUREPATH_API_KEY", "WIKI_AGENT_API_KEY"),
+        user_agent=env_value(
+            "TRAVERSE_USER_AGENT",
             "PUREPATH_USER_AGENT",
-            os.getenv(
-                "WIKI_AGENT_USER_AGENT",
-                "PurePath/0.2 (+https://github.com/abrakjamson/PurePath)",
-            ),
+            "WIKI_AGENT_USER_AGENT",
+            "Traverse/0.4 (+https://github.com/abrakjamson/Traverse)",
         ),
         crawl_delay_seconds=float(
-            os.getenv("PUREPATH_CRAWL_DELAY", os.getenv("WIKI_AGENT_CRAWL_DELAY", "1"))
+            env_value(
+                "TRAVERSE_CRAWL_DELAY",
+                "PUREPATH_CRAWL_DELAY",
+                "WIKI_AGENT_CRAWL_DELAY",
+                "1",
+            )
         ),
-        cache_ttl_seconds=int(os.getenv("PUREPATH_CACHE_TTL", os.getenv("WIKI_AGENT_CACHE_TTL", "86400"))),
+        cache_ttl_seconds=int(
+            env_value(
+                "TRAVERSE_CACHE_TTL",
+                "PUREPATH_CACHE_TTL",
+                "WIKI_AGENT_CACHE_TTL",
+                "86400",
+            )
+        ),
         cache_path=args.cache_path,
         max_concurrency=int(
-            os.getenv("PUREPATH_MAX_CONCURRENCY", os.getenv("WIKI_AGENT_MAX_CONCURRENCY", "1"))
+            env_value(
+                "TRAVERSE_MAX_CONCURRENCY",
+                "PUREPATH_MAX_CONCURRENCY",
+                "WIKI_AGENT_MAX_CONCURRENCY",
+                "1",
+            )
         ),
         rate_limit_rps=float(
-            os.getenv("PUREPATH_RATE_LIMIT_RPS", os.getenv("WIKI_AGENT_RATE_LIMIT_RPS", "1"))
+            env_value(
+                "TRAVERSE_RATE_LIMIT_RPS",
+                "PUREPATH_RATE_LIMIT_RPS",
+                "WIKI_AGENT_RATE_LIMIT_RPS",
+                "1",
+            )
         ),
         robots_ttl_seconds=int(
-            os.getenv("PUREPATH_ROBOTS_TTL", os.getenv("WIKI_AGENT_ROBOTS_TTL", "86400"))
+            env_value(
+                "TRAVERSE_ROBOTS_TTL",
+                "PUREPATH_ROBOTS_TTL",
+                "WIKI_AGENT_ROBOTS_TTL",
+                "86400",
+            )
         ),
         request_timeout_seconds=float(
-            os.getenv("PUREPATH_REQUEST_TIMEOUT", os.getenv("WIKI_AGENT_REQUEST_TIMEOUT", "20"))
+            env_value(
+                "TRAVERSE_REQUEST_TIMEOUT",
+                "PUREPATH_REQUEST_TIMEOUT",
+                "WIKI_AGENT_REQUEST_TIMEOUT",
+                "20",
+            )
         ),
-        max_retries=int(os.getenv("PUREPATH_MAX_RETRIES", os.getenv("WIKI_AGENT_MAX_RETRIES", "3"))),
+        max_retries=int(
+            env_value(
+                "TRAVERSE_MAX_RETRIES",
+                "PUREPATH_MAX_RETRIES",
+                "WIKI_AGENT_MAX_RETRIES",
+                "3",
+            )
+        ),
         dev=args.dev,
         base_url=base_url,
     )

@@ -1,4 +1,4 @@
-name: Release plugin binaries
+name: Release Traverse binaries
 
 on:
   push:
@@ -17,13 +17,13 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            asset: purepath-windows-x64.exe
+            asset: traverse-windows-x64.exe
           - os: ubuntu-latest
-            asset: purepath-linux-x64
+            asset: traverse-linux-x64
           - os: macos-15-intel
-            asset: purepath-macos-x64
+            asset: traverse-macos-x64
           - os: macos-14
-            asset: purepath-macos-arm64
+            asset: traverse-macos-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -95,10 +95,10 @@ jobs:
 
       - name: Create checksum manifest
         working-directory: release
-        run: sha256sum purepath-* > SHA256SUMS
+        run: sha256sum traverse-* > SHA256SUMS
 
       - name: Add installer scripts
-        run: cp scripts/install-purepath.ps1 scripts/install-purepath.sh release/
+        run: cp scripts/install-traverse.ps1 scripts/install-traverse.sh release/
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

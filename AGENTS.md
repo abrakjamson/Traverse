@@ -1,4 +1,4 @@
-# PurePath provider development
+# Traverse provider development
 
 This repository implements a local MCP server for polite, user-directed
 navigation of public hypertext. Prefer following links in server-rendered HTML
@@ -22,12 +22,12 @@ Do not implement a provider until all of these checks are complete:
 4. Confirm the site does not require authentication, CAPTCHA circumvention,
    browser automation, a private endpoint, or a bot-protection bypass.
 5. Identify a deterministic starting point such as a portal, A-Z directory,
-   department page, archive, public feed, or sitemap. PurePath does not use
+   department page, archive, public feed, or sitemap. Traverse does not use
    site-search routes.
 
 If policy language is ambiguous, document the ambiguity for the user and wait
 for an explicit decision before implementation. Never work around a site's
-technical refusal to serve the configured PurePath user agent.
+technical refusal to serve the configured Traverse user agent.
 
 ## Choose the smallest adapter type
 
@@ -176,7 +176,7 @@ against representative live pages:
 6. Check that a known blocked path fails and that robots state was loaded.
 7. Remove temporary cache files created for validation.
 
-Use the configured descriptive `PUREPATH_USER_AGENT`, honor the site's crawl
+Use the configured descriptive `TRAVERSE_USER_AGENT`, honor the site's crawl
 delay, and keep requests sequential and minimal. A live 403, CAPTCHA, robots
 failure, empty client-rendered shell, or redirect into a blocked route is a
 provider blocker, not an invitation to bypass the site.
@@ -187,4 +187,4 @@ A provider is complete only when its policy decision is recorded in the work
 summary, URL handling fails closed, parsing works on representative fixtures,
 the domain cannot fall through to generic web, MCP help is updated, the full
 test suite passes, and the real navigation chain works with the normal
-PurePath fetcher.
+Traverse fetcher.

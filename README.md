@@ -1,38 +1,40 @@
-# PurePath installation
+# Traverse installation
 
-## 1. Install the `purepath` command
+## 1. Install the `traverse` command
 
 Choose either the Python package or a standalone binary. The Copilot plugin
-uses the `purepath` command from `PATH`.
+uses the `traverse` command from `PATH`.
 
 ### Python 3.11 or newer
 
-Install with `pipx` so PurePath has an isolated environment:
+Install with `pipx` so Traverse has an isolated environment:
 
 ```powershell
-gh repo clone abrakjamson/PurePath
-Set-Location PurePath
+gh repo clone abrakjamson/Traverse
+Set-Location Traverse
 pipx install .
-purepath --help
+traverse --help
 ```
+
+The previous `purepath` command remains as a compatibility alias.
 
 ### Standalone binary on Windows x64
 
 This path does not require Python or npm. The installer uses GitHub CLI to
 download the latest release, verify its SHA-256 checksum, install
-`purepath.exe` under the current user profile, and add that directory to the
+`traverse.exe` under the current user profile, and add that directory to the
 user `PATH`.
 
 ```powershell
-gh repo clone abrakjamson/PurePath
-Set-Location PurePath
-.\scripts\install-purepath.ps1
+gh repo clone abrakjamson/Traverse
+Set-Location Traverse
+.\scripts\install-traverse.ps1
 ```
 
 Open a new terminal, then verify:
 
 ```powershell
-purepath --help
+traverse --help
 ```
 
 ### Standalone binary on Linux or macOS
@@ -41,45 +43,45 @@ This path does not require Python or npm. It supports Linux x64, macOS x64,
 and macOS arm64.
 
 ```bash
-gh repo clone abrakjamson/PurePath
-cd PurePath
-./scripts/install-purepath.sh
+gh repo clone abrakjamson/Traverse
+cd Traverse
+./scripts/install-traverse.sh
 ```
 
 If `~/.local/bin` is not already on `PATH`, add it before continuing:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-purepath --help
+traverse --help
 ```
 
 ## 2. Install the GitHub Copilot CLI plugin
 
-After `purepath --help` succeeds:
+After `traverse --help` succeeds:
 
 ```powershell
-copilot plugin marketplace add abrakjamson/PurePath
-copilot plugin install purepath@purepath-plugins
-copilot --agent purepath:purepath-researcher
+copilot plugin marketplace add abrakjamson/Traverse
+copilot plugin install traverse@traverse-plugins
+copilot --agent traverse:traverse-researcher
 ```
 
-The plugin contains the PurePath-only research agent and MCP configuration; it
+The plugin contains the Traverse-only research agent and MCP configuration; it
 does not install or bundle the server runtime. Update it with:
 
 ```powershell
-copilot plugin update purepath
+copilot plugin update traverse
 ```
 
 ## Install only the MCP server integration
 
-If you do not want the custom agent, install `purepath` using either method
+If you do not want the custom agent, install `traverse` using either method
 above and add it directly:
 
 ```powershell
 copilot mcp add --transport stdio `
-  --env "PUREPATH_CACHE_PATH=$HOME\.copilot\purepath-cache.sqlite3" `
-  --env "PUREPATH_USER_AGENT=PurePath/0.2 (+https://github.com/abrakjamson)" `
-  PurePath -- purepath
+  --env "TRAVERSE_CACHE_PATH=$HOME\.copilot\traverse-cache.sqlite3" `
+  --env "TRAVERSE_USER_AGENT=Traverse/0.4 (+https://github.com/abrakjamson)" `
+  Traverse -- traverse
 ```
 
 Restart an already-running Copilot CLI session after changing the server:
@@ -91,5 +93,5 @@ Restart an already-running Copilot CLI session after changing the server:
 Verify the integration:
 
 ```powershell
-copilot mcp get PurePath
+copilot mcp get Traverse
 ```

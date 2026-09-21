@@ -1,24 +1,24 @@
 #!/bin/sh
 set -eu
 
-repository=abrakjamson/PurePath
+repository=abrakjamson/Traverse
 version=${1:-}
-install_directory=${PUREPATH_INSTALL_DIR:-"$HOME/.local/bin"}
+install_directory=${TRAVERSE_INSTALL_DIR:-${PUREPATH_INSTALL_DIR:-"$HOME/.local/bin"}}
 platform=$(uname -s)
 architecture=$(uname -m)
 
 case "$platform-$architecture" in
   Linux-x86_64)
-    asset=purepath-linux-x64
+    asset=traverse-linux-x64
     ;;
   Darwin-x86_64)
-    asset=purepath-macos-x64
+    asset=traverse-macos-x64
     ;;
   Darwin-arm64)
-    asset=purepath-macos-arm64
+    asset=traverse-macos-arm64
     ;;
   *)
-    echo "The current PurePath release does not support $platform/$architecture." >&2
+    echo "The current Traverse release does not support $platform/$architecture." >&2
     exit 1
     ;;
 esac
@@ -28,7 +28,7 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/purepath-install.XXXXXX")
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/traverse-install.XXXXXX")
 trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
 
 if [ -n "$version" ]; then
@@ -70,8 +70,10 @@ if [ "$actual" != "$expected" ]; then
 fi
 
 mkdir -p "$install_directory"
-install -m 755 "$temporary_directory/$asset" "$install_directory/purepath"
-echo "Installed PurePath to $install_directory/purepath"
+install -m 755 "$temporary_directory/$asset" "$install_directory/traverse"
+ln -sf traverse "$install_directory/purepath"
+echo "Installed Traverse to $install_directory/traverse"
+echo "Installed compatibility alias at $install_directory/purepath"
 
 case ":$PATH:" in
   *":$install_directory:"*) ;;

@@ -3,8 +3,8 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "purepath"
-version = "0.2.0"
+name = "traverse"
+version = "0.4.0"
 description = "Polite local MCP server for traversing and reading web knowledge sources"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,7 @@ test = [
 ]
 
 [project.scripts]
+traverse = "wiki_agent.__main__:main"
 purepath = "wiki_agent.__main__:main"
 
 [tool.setuptools.packages.find]

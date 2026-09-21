@@ -1,8 +1,8 @@
-# PurePath end-to-end evaluation
+# Traverse end-to-end evaluation
 
 Date: 2026-08-31
 
-Fifteen GPT-5.6 Luna evaluators tested PurePath using only its MCP tools. The
+Fifteen GPT-5.6 Luna evaluators tested Traverse using only its MCP tools. The
 suite covered every provider and three cross-provider workflows. Evaluators
 were required to start with `help`, follow returned links rather than inventing
 URLs, report their call trace, and identify failures separately from bugs.
@@ -99,7 +99,7 @@ Those elements are now included in text and summary extraction.
 
 ## Overall assessment
 
-PurePath reliably answered the questions that matched a provider's published
+Traverse reliably answered the questions that matched a provider's published
 directory structure and failed safely when the required fact was not linked or
 permitted. The strongest workflows were FRED, StockAnalysis, Fox Sports, IKEA,
 Staples, NPR, arXiv abstracts, and Wikipedia orientation. The main remaining

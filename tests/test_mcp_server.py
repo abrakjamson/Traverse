@@ -27,17 +27,17 @@ def server(monkeypatch, tmp_path):
     return create_mcp_server(config)
 
 
-def test_mcp_server_registers_purepath_tools(server) -> None:
+def test_mcp_server_registers_traverse_tools(server) -> None:
     tools = {tool.name for tool in asyncio.run(server.list_tools())}
 
-    assert server.name == "PurePath"
+    assert server.name == "Traverse"
     assert tools == {"help", "traverse", "skim", "read", "health"}
 
 
 def test_help_describes_tools_sites_and_traversal_examples(server) -> None:
     _, result = asyncio.run(server.call_tool("help", {}))
 
-    assert result["server"] == "PurePath"
+    assert result["server"] == "Traverse"
     assert set(result["tools"]) == {"help", "traverse", "skim", "read", "health"}
     assert {site["provider"] for site in result["supported_sites"]} == {
         "wikipedia",

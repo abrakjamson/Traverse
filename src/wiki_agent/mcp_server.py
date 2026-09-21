@@ -14,7 +14,7 @@ from .providers import build_registry
 
 def create_mcp_server(config: Config) -> FastMCP:
     mcp = FastMCP(
-        "PurePath",
+        "Traverse",
         instructions=(
             "Browse supported knowledge sites politely. Use traverse for link discovery, "
             "skim for section-level understanding, and read for full page content. "
@@ -32,7 +32,7 @@ def create_mcp_server(config: Config) -> FastMCP:
 
     @mcp.tool()
     def help() -> dict[str, Any]:
-        """Describe PurePath tools, supported sites, restrictions, and traversal workflows."""
+        """Describe Traverse tools, supported sites, restrictions, and traversal workflows."""
         return build_help()
 
     @mcp.tool()
