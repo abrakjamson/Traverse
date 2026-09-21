@@ -176,10 +176,10 @@ against representative live pages:
 6. Check that a known blocked path fails and that robots state was loaded.
 7. Remove temporary cache files created for validation.
 
-Use the configured descriptive `TRAVERSE_USER_AGENT`, honor the site's crawl
-delay, and keep requests sequential and minimal. A live 403, CAPTCHA, robots
-failure, empty client-rendered shell, or redirect into a blocked route is a
-provider blocker, not an invitation to bypass the site.
+Use the configured `TRAVERSE_USER_AGENT` (which defaults to `Traverse`), honor
+the site's crawl delay, and keep requests sequential and minimal. A live 403,
+CAPTCHA, robots failure, empty client-rendered shell, or redirect into a blocked
+route is a provider blocker, not an invitation to bypass the site.
 
 ## Definition of done
 

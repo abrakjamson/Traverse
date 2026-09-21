@@ -65,7 +65,7 @@ def load_config(args: argparse.Namespace) -> Config:
         api_key=os.getenv("TRAVERSE_API_KEY"),
         user_agent=os.getenv(
             "TRAVERSE_USER_AGENT",
-            "Traverse/0.5 (+https://github.com/abrakjamson/Traverse)",
+            "Traverse",
         ),
         crawl_delay_seconds=float(
             os.getenv("TRAVERSE_CRAWL_DELAY", "1")
