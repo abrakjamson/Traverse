@@ -6,6 +6,15 @@ Traverse is a new kind of search engine. It is built ground-up to take advantage
 
 You can install it now and use it with any AI that can use local MCP servers.
 
+## Contents
+
+- [A unique search engine](#a-unique-search-engine)
+- [Quick Start](#quick-start)
+- [Detailed installation instructions](#detailed-installation-instructions)
+  - [Install the `traverse` utility](#1-install-the-traverse-utility)
+  - [Connect your AI client](#2-connect-your-ai-client)
+- [Contributions](#contributions)
+
 ## A unique search engine
 
 Unlike other search engines, Traverse does not crawl and index the internet. Instead, agents browse like you do: reading pages and clicking links.
@@ -31,7 +40,7 @@ copilot plugin install traverse@traverse-plugins
 
 3. Type a search, like "Use a Traverse sub-agent to find which of the last 10 presidents have had dogs and their names"
 
-## Detail install instructions
+## Detailed installation instructions
 
 ### 1. Install the `traverse` utility
 
@@ -153,3 +162,10 @@ server. The equivalent manual configuration in `~/.codex/config.toml` is:
 [mcp_servers.traverse]
 command = "traverse"
 ```
+
+## Contributions
+
+Contributions are welcome. To add or update a supported website, follow the
+[Traverse provider development instructions](AGENTS.md), which cover site
+policy review, adapter design, URL safety, tests, documentation, and live
+validation.
