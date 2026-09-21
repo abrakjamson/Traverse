@@ -4,7 +4,7 @@ Traverse is a local MCP server designed for AI agents to search the internet.
 
 Traverse is a new kind of search engine. It is built from the ground up to
 take advantage of AI and its ability to reason. By navigating links instead of
-using a search index, it avoids search-engine rankings and much of the SEO
+using a search index, it avoids search-engine rankings and the SEO
 manipulation that comes with them.
 
 You can install it now and use it with any AI that can use local MCP servers.
@@ -20,29 +20,14 @@ You can install it now and use it with any AI that can use local MCP servers.
 
 ## A unique search engine
 
-Unlike other search engines, Traverse does not pre-crawl the internet or
-maintain a search index. Instead, agents browse on demand like you do: reading
-pages and following links.
+Unlike other search engines, Traverse does not crawl and index the internet. Instead, agents browse like you do: reading pages and clicking links.
 
 Traverse follows these principles:
+1. Only use websites that allow for automated and agentic use in their Terms of Service and robots.txt
+2. Never use a search index, even when implemented in a site and allowed for agentic use
+3. Browse how a human would when conducting research
 
-1. Add specialized providers only after reviewing the site's current Terms of
-   Service and `robots.txt`, and enforce `robots.txt` at fetch time.
-2. Do not invoke a search index, even when a site offers one and permits
-   automated use. Specialized adapters reject known search routes.
-3. Browse how a human would when conducting research.
-
-A research path can start from a high-quality website like Wikipedia, then
-navigate to other pages by reading, inspecting links, and opening them. This
-keeps your AI in charge of reasoning instead of relying on whatever a search
-provider recommends.
-
-Traverse can also open user-supplied public HTTPS HTML and PDF URLs through its
-generic web adapter. These requests are checked against `robots.txt`, but the
-site may not have undergone the provider-specific Terms review required for a
-specialized adapter, and the generic adapter cannot reliably identify every
-site-specific search endpoint. Callers are responsible for supplying compliant,
-non-search URLs.
+Traverse starts from a high-quality website like Wikipedia, then navigates to other pages by reading, inspecting links, and opening them. This keeps your AI in charge of reasoning, not ending up with whatever the search provider has recommended.
 
 It isn't perfect, and it won't work at all how you are used to. Traversal takes time and consumes tokens. It's best when running in a sub-agent on a cheap reasoning model.
 
